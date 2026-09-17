@@ -236,19 +236,27 @@ function render(c, offline){
   if (!slug || !/^[a-z0-9-]{2,40}$/.test(slug)) { view('vMissing'); return; }
   const saved = cache.get(slug);
   if (saved) { try { render(JSON.parse(saved), false); } catch(e){} }
+  let res, j, detail = '';
   try {
-    const res = await fetch(API + '?c=' + encodeURIComponent(slug));
-    const j = await res.json();
-    if (j.ok) { cache.set(slug, JSON.stringify(j.data)); render(j.data, false); }
-    else { cache.set(slug, null); view('vMissing'); }
-  } catch (e) {
-    if (saved) $('#pubOffline').hidden = false;
-    else {
-      $('#missingTitle').textContent = 'No connection';
-      $('#missingText').textContent = 'The card could not be loaded. Check your internet connection and try again.';
-      view('vMissing');
-    }
+    res = await fetch(API + '?c=' + encodeURIComponent(slug));
+  } catch (e) { detail = 'network: ' + e.message; }
+  if (res) {
+    const txt = await res.text().catch(() => '');
+    try { j = JSON.parse(txt); }
+    catch (e) { detail = 'HTTP ' + res.status + ': ' + txt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120); }
   }
+  if (j && j.ok) { cache.set(slug, JSON.stringify(j.data)); render(j.data, false); return; }
+  if (j && !j.ok) { cache.set(slug, null); view('vMissing'); return; }
+  if (saved) { $('#pubOffline').hidden = false; return; }
+  $('#missingTitle').textContent = res ? 'Card could not be loaded' : 'No connection';
+  $('#missingText').textContent = res
+    ? 'The server did not respond as expected. Please try again later.'
+    : 'Check your internet connection and try again.';
+  const d = document.createElement('p');
+  d.style.cssText = 'margin-top:18px;font-size:.75rem;opacity:.6;word-break:break-word';
+  d.textContent = detail;
+  $('#vMissing').appendChild(d);
+  view('vMissing');
 })();
 </script>
 </body>
