@@ -1,860 +1,564 @@
-<!DOCTYPE html>
-<html lang="da">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Business card</title>
-<meta name="description" content="Digital business card">
-<meta property="og:title" content="Digital business card">
-<meta property="og:description" content="Open the card and save the contact to your phone.">
-<meta name="theme-color" content="#11140f">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Visitkort">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Space+Mono&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script>
-  /* =====================================================================
-     INDSÆT DIN APPS SCRIPT /exec-URL HER (se README del 2)
-     ===================================================================== */
-  window.API_URL = "https://script.google.com/macros/s/INDSÆT-DEPLOYMENT-ID/exec";
-</script>
-<style>
-:root{
-  --bg:#11140f; --panel:#1a1f18; --line:#2e3629; --text:#e6eae1; --muted:#98a28f;
-  --teal:#2bb3a3; --lime:#b6e04a; --err:#ff7a6b;
-  --sans:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"Space Mono",ui-monospace,Menlo,monospace;
-}
-*{box-sizing:border-box;margin:0}
-html,body{background:var(--bg);color:var(--text);font-family:var(--sans)}
-body{padding:calc(20px + env(safe-area-inset-top)) 14px 48px;display:flex;justify-content:center;min-height:100vh}
-.wrap{width:100%;max-width:440px}
-.wrap.wide{max-width:1000px}
-[hidden]{display:none!important}
-h2{font-size:1.25rem;font-weight:700;margin-bottom:12px}
-h3{font-size:1rem;font-weight:700;margin:24px 0 4px}
-.muted{color:var(--muted);font-size:.9rem;line-height:1.45}
-.mono{font-family:var(--mono);font-size:.85rem;overflow-wrap:anywhere}
+/**
+ * VISITKORT – Google Apps Script API  (v3)
+ * Kører usynligt bag GitHub Pages. Ingen HTML her – kun JSON og vCard.
+ * Opsætning: se README.md
+ */
+const CFG = {
+  PUBLIC_BASE: 'https://bernt84.github.io/visitkort/', // adressen på GitHub-siden (med / til sidst)
+  FIRST_ADMIN: 'martin',
+  FIRST_ADMIN_PW: 'SkiftMig123!',                      // skal skiftes ved første login
+  SESSION_SEC: 21600,                                  // 6 timer (max i CacheService)
+  MAX_FAIL: 5,
+  LOCK_SEC: 900,
+  PHOTO_MAX: 48000,                                    // tegn (en celle i Sheets kan max 50.000)
+  MAX_LINKS: 4,
+  FOLDER_NAME: 'Visitkort',                            // mappe i Google Drive (oprettes automatisk)
+  SHEET_NAME: 'Visitkort data',                        // regnearket (oprettes automatisk i mappen)
+  BACKUP_KEEP: 14                                      // antal daglige backups der gemmes
+};
 
-form,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
-label{display:block;font-size:.85rem;color:var(--muted);margin:12px 0 5px}
-input,select,textarea{width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
-textarea{min-height:70px;resize:vertical}
-input[type=color]{padding:3px;height:44px;cursor:pointer}
-input[type=checkbox]{width:22px;height:22px;accent-color:var(--teal);flex:none}
-input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--teal);outline-offset:1px}
-button,.fbtn{font:inherit;font-weight:600;font-size:.95rem;border-radius:9px;padding:11px 16px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;text-decoration:none;display:inline-block}
-button.go{background:var(--teal);border-color:var(--teal);color:#0b1210}
-button.danger{color:var(--err);border-color:#5a2e29}
-button.sm,.fbtn.sm{padding:7px 10px;font-size:.85rem}
-button:disabled{opacity:.5;cursor:wait}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
-.check{display:flex;gap:10px;align-items:center;margin-top:14px;color:var(--text);font-size:.95rem}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:0 10px}
-.msg{margin-top:12px;font-size:.9rem;min-height:1.2em;line-height:1.4}
-.msg.err{color:var(--err)} .msg.ok{color:var(--lime)}
-.pwwrap{position:relative}
-.pwwrap input{padding-right:70px}
-.pwwrap button{position:absolute;right:5px;top:5px;padding:6px 9px;font-size:.8rem}
-.loading{color:var(--muted);text-align:center;padding:60px 0}
-
-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-header .who{font-weight:700}
-nav{display:flex;gap:6px;margin-bottom:16px}
-nav button[aria-pressed=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
-.editor{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start}
-.side{position:sticky;top:14px;display:grid;gap:12px}
-.notice{border:1px solid var(--teal);border-radius:11px;padding:14px;margin-bottom:14px;line-height:1.55}
-.stats{display:flex;gap:18px;margin-top:12px}
-.stats b{display:block;font-size:1.4rem}
-
-.photoedit{display:flex;gap:14px;align-items:center}
-.photoedit .thumb{width:72px;height:72px;border-radius:50%;flex:none;object-fit:cover;border:1px solid var(--line)}
-.presets{display:flex;gap:8px;flex-wrap:wrap}
-.presets button{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;font-size:.85rem}
-.presets button[aria-pressed=true]{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
-.sw{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;flex:none}
-.sw i{width:10px;height:10px;border-radius:50%;display:block}
-.linkrow{display:grid;grid-template-columns:1fr 1.6fr auto;gap:8px;margin-top:8px;align-items:center}
-
-table{width:100%;border-collapse:collapse;font-size:.92rem}
-th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600}
-.tag{display:inline-block;font-size:.75rem;padding:2px 7px;border-radius:5px;border:1px solid var(--line);color:var(--muted);margin:0 4px 4px 0}
-.tag.admin{border-color:var(--lime);color:var(--lime)}
-.tag.off{border-color:var(--err);color:var(--err)}
-.acts{display:flex;gap:6px;flex-wrap:wrap}
-
-/* ---------- det offentlige kort ---------- */
-.themed{--bg:#11140f;--card:#1a1f18;--tx:#e6eae1;--mu:rgba(230,234,225,.68);--ln:rgba(230,234,225,.16);--acc:#b6e04a;--on:#111;--ff:Archivo,system-ui,sans-serif;
-  font-family:var(--ff);color:var(--tx)}
-.stage{background:var(--bg);border-radius:18px;padding:16px}
-.vcard{background:var(--card);border:1px solid var(--ln);border-top:5px solid var(--acc);border-radius:16px;padding:22px 20px;display:flex;gap:16px;align-items:center}
-.vcard.lay-top{flex-direction:column;text-align:center;padding-top:26px}
-.vcard .ph{width:84px;height:84px;object-fit:cover;flex:none;border-radius:50%;border:2px solid var(--acc)}
-.vcard.lay-top .ph{width:116px;height:116px}
-.vcard .ph.square{border-radius:14px}
-.vcard .cb{min-width:0}
-.vcard .co{color:var(--mu);font-weight:600;font-size:.88rem}
-.vcard .nm{font-size:1.75rem;font-weight:700;line-height:1.1;margin:6px 0;overflow-wrap:anywhere}
-.vcard .ti{color:var(--acc);font-weight:600}
-.vcard .nt{color:var(--mu);font-size:.88rem;margin-top:8px;line-height:1.45;white-space:pre-line}
-.vlinks{display:grid;gap:9px;margin-top:12px}
-.vlinks a,.vlinks button{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;border-radius:11px;width:100%;
-  border:1px solid var(--ln);background:var(--card);color:var(--tx);text-decoration:none;font:inherit;font-weight:600;min-width:0;text-align:left}
-.vlinks span{color:var(--mu);font-weight:400;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vlinks .primary{background:var(--acc);border-color:var(--acc);color:var(--on);justify-content:center;font-size:1.05rem;padding:16px}
-.vqr{display:flex;gap:14px;align-items:center;margin-top:12px;padding:14px;border:1px solid var(--ln);border-radius:11px;color:var(--mu);font-size:.88rem;line-height:1.4}
-.qr{background:#fff;padding:8px;border-radius:6px;flex:none;line-height:0}
-.qr img,.qr canvas{width:120px;height:120px}
-.vfoot{text-align:center;margin-top:18px;font-size:.8rem}
-.vfoot a{color:var(--mu)}
-
-body.public{padding:0}
-body.public #vPublic{max-width:none;min-height:100vh;display:flex;justify-content:center;background:var(--bg)}
-body.public #vPublic .stage{width:100%;max-width:440px;padding:calc(22px + env(safe-area-inset-top)) 14px 40px}
-
-@media (max-width:800px){
-  .editor{grid-template-columns:1fr}
-  .side{position:static;order:-1}
-  thead{display:none}
-  tr{display:block;border-bottom:1px solid var(--line);padding:10px 0}
-  td{display:block;border:0;padding:3px 0}
-}
-@media (max-width:440px){ .grid2{grid-template-columns:1fr} .grid4{grid-template-columns:1fr 1fr} .linkrow{grid-template-columns:1fr auto} .linkrow input:first-child{grid-column:1/-1} }
-@media print{ body{background:#fff} .noprint{display:none!important} }
-</style>
-</head>
-<body>
-
-<div id="vLoading" data-view class="wrap loading">Loading…</div>
-
-<!-- OFFENTLIGT KORT -->
-<div id="vPublic" data-view class="wrap themed" hidden>
-  <div class="stage">
-    <div id="pubCard"></div>
-    <div class="vlinks" id="pubLinks"></div>
-    <div class="vqr"><div class="qr" id="pubQr"></div><div id="pubScan"></div></div>
-    <div class="vfoot" id="pubOffline" hidden></div>
-  </div>
-</div>
-
-<div id="vMissing" data-view class="wrap" hidden>
-  <div class="panel"><h2 id="missingTitle">Card not found</h2><p class="muted" id="missingText">The link is incorrect, or the card is hidden.</p></div>
-</div>
-
-<!-- LOGIN -->
-<div id="vLogin" data-view class="wrap" hidden>
-  <form id="fLogin">
-    <h2>Log ind</h2>
-    <label for="lu">Brugernavn</label>
-    <input id="lu" autocomplete="username" autocapitalize="none" autocorrect="off" required>
-    <label for="lp">Adgangskode</label>
-    <div class="pwwrap"><input id="lp" type="password" autocomplete="current-password" required><button type="button" data-toggle="lp">Vis</button></div>
-    <div class="row"><button class="go" type="submit">Log ind</button></div>
-    <div class="msg" id="mLogin"></div>
-    <p class="muted" style="margin-top:14px">Glemt koden? Kontakt administratoren, så får du en ny.</p>
-  </form>
-</div>
-
-<!-- SKIFT KODE -->
-<div id="vPw" data-view class="wrap" hidden>
-  <form id="fPw">
-    <h2>Vælg ny adgangskode</h2>
-    <p class="muted" id="pwInfo">Mindst 8 tegn.</p>
-    <div id="oldWrap">
-      <label for="po">Nuværende adgangskode</label>
-      <input id="po" type="password" autocomplete="current-password">
-    </div>
-    <label for="pn">Ny adgangskode</label>
-    <div class="pwwrap"><input id="pn" type="password" autocomplete="new-password" minlength="8" required><button type="button" data-toggle="pn">Vis</button></div>
-    <label for="pn2">Gentag ny adgangskode</label>
-    <input id="pn2" type="password" autocomplete="new-password" minlength="8" required>
-    <div class="row">
-      <button class="go" type="submit">Gem adgangskode</button>
-      <button type="button" id="pwCancel">Annullér</button>
-    </div>
-    <div class="msg" id="mPw"></div>
-  </form>
-</div>
-
-<!-- APP -->
-<div id="vApp" data-view class="wrap wide" hidden>
-  <header class="noprint">
-    <div><div class="who" id="who"></div><div class="muted mono" id="whoSub"></div></div>
-    <div class="acts">
-      <button class="sm" id="bPw">Skift adgangskode</button>
-      <button class="sm" id="bOut">Log ud</button>
-    </div>
-  </header>
-  <nav class="noprint" id="tabs">
-    <button class="sm" data-tab="edit" aria-pressed="true">Mit kort</button>
-    <button class="sm" data-tab="users" id="tabUsers" hidden>Brugere</button>
-  </nav>
-
-  <section id="tEdit">
-    <div class="notice" id="editingOther" hidden></div>
-    <div class="editor">
-      <form id="fCard" class="noprint">
-        <h2>Profilbillede</h2>
-        <div class="photoedit">
-          <img class="thumb" id="photoThumb" alt="" hidden>
-          <div class="acts">
-            <label class="fbtn sm" for="photoIn" style="margin:0;color:var(--text)">Vælg billede</label>
-            <input id="photoIn" type="file" accept="image/*" hidden>
-            <button type="button" class="sm" id="photoDel" hidden>Fjern billede</button>
-          </div>
-        </div>
-        <p class="muted" style="margin-top:8px">Billedet beskæres til et kvadrat fra midten og kommer med, når andre gemmer kontakten.</p>
-
-        <h3>Oplysninger</h3>
-        <div class="grid2">
-          <div><label for="c_firstName">Fornavn(e)</label><input id="c_firstName" autocomplete="given-name"></div>
-          <div><label for="c_lastName">Efternavn</label><input id="c_lastName" autocomplete="family-name"></div>
-        </div>
-        <div class="grid2">
-          <div><label for="c_title">Titel</label><input id="c_title" autocomplete="organization-title"></div>
-          <div><label for="c_company">Firma</label><input id="c_company" autocomplete="organization"></div>
-        </div>
-        <div class="grid2">
-          <div><label for="c_phone">Telefon</label><input id="c_phone" type="tel" placeholder="+45 12 34 56 78" autocomplete="tel"></div>
-          <div><label for="c_email">Mail</label><input id="c_email" type="email" autocomplete="email" autocapitalize="none"></div>
-        </div>
-        <label for="c_linkedin">LinkedIn</label>
-        <input id="c_linkedin" placeholder="linkedin.com/in/dit-navn eller bare dit-navn" autocapitalize="none" autocorrect="off">
-        <label for="c_web">Hjemmeside</label>
-        <input id="c_web" placeholder="www.firma.dk" autocapitalize="none" autocorrect="off">
-        <label for="c_address">Adresse eller by</label>
-        <input id="c_address" autocomplete="street-address">
-        <label for="c_note">Kort tekst (fx certifikater)</label>
-        <textarea id="c_note" maxlength="500"></textarea>
-
-        <h3>Flere links</h3>
-        <p class="muted">Fx Facebook, Instagram, portfolio eller firmaets LinkedIn. Op til 4.</p>
-        <div id="linkRows"></div>
-        <div class="row" style="margin-top:10px"><button type="button" class="sm" id="addLink">Tilføj link</button></div>
-
-        <h3>Udseende</h3>
-        <label>Farvetema</label>
-        <div class="presets" id="presets"></div>
-        <div class="grid4">
-          <div><label for="t_bg">Baggrund</label><input id="t_bg" type="color"></div>
-          <div><label for="t_card">Kort</label><input id="t_card" type="color"></div>
-          <div><label for="t_text">Tekst</label><input id="t_text" type="color"></div>
-          <div><label for="t_accent">Accent</label><input id="t_accent" type="color"></div>
-        </div>
-        <div class="grid2">
-          <div><label for="t_font">Skrifttype</label><select id="t_font"></select></div>
-          <div><label for="t_layout">Opsætning</label>
-            <select id="t_layout"><option value="side">Billede ved siden af navnet</option><option value="top">Billede øverst, centreret</option></select></div>
-        </div>
-        <div class="grid2">
-          <div><label for="t_shape">Billedform</label>
-            <select id="t_shape"><option value="round">Rund</option><option value="square">Firkantet</option></select></div>
-          <div><label for="t_lang">Sprog på kortet</label>
-            <select id="t_lang"><option value="en">Engelsk</option><option value="da">Dansk</option></select></div>
-        </div>
-        <p class="muted" style="margin-top:6px">Sproget gælder knapperne på kortet. Titel og tekst skriver du selv på det sprog, du ønsker.</p>
-
-        <h3>Synlighed</h3>
-        <label class="check"><input type="checkbox" id="c_hidden"> Skjul kortet for andre</label>
-        <p class="muted" style="margin-top:6px">Når kortet er skjult, viser linket og NFC-tagget "Card not found".</p>
-
-        <div class="row">
-          <button class="go" type="submit">Gem kort</button>
-          <button type="button" id="bBackMine" hidden>Tilbage til mit kort</button>
-        </div>
-        <div class="msg" id="mCard"></div>
-      </form>
-
-      <div class="side">
-        <div class="themed" id="prevWrap">
-          <div class="stage">
-            <div id="prevCard"></div>
-            <div class="vlinks" id="prevLinks"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div style="display:flex;gap:14px;align-items:center">
-            <div class="qr" id="prevQr"></div>
-            <div>
-              <p class="muted">Brug samme link i QR-koden, på NFC-tagget og i Wallet.</p>
-              <div class="stats">
-                <div><b id="stViews">0</b><span class="muted">visninger</span></div>
-                <div><b id="stSaves">0</b><span class="muted">gemt</span></div>
-              </div>
-            </div>
-          </div>
-          <label for="shareUrl">Link til kortet</label>
-          <input id="shareUrl" class="mono" readonly>
-          <div class="row noprint">
-            <button class="sm" id="bCopy" type="button">Kopiér link</button>
-            <button class="sm" id="bQr" type="button">Hent QR-kode</button>
-            <a class="fbtn sm" id="bOpen" target="_blank" rel="noopener">Åbn kortet</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="tUsers" hidden>
-    <div class="notice" id="newPwBox" hidden></div>
-    <form id="fNew" style="margin-bottom:16px">
-      <h2>Opret bruger</h2>
-      <div class="grid2">
-        <div><label for="n_user">Brugernavn (bruges i linket)</label>
-          <input id="n_user" placeholder="fx anne" autocapitalize="none" autocorrect="off" pattern="[a-zA-Z0-9\-]{2,30}" required></div>
-        <div><label for="n_name">Fulde navn</label><input id="n_name" required></div>
-      </div>
-      <label for="n_role">Rolle</label>
-      <select id="n_role"><option value="user">Bruger (retter kun eget kort)</option><option value="admin">Administrator</option></select>
-      <div class="row"><button class="go" type="submit">Opret bruger</button></div>
-      <div class="msg" id="mNew"></div>
-    </form>
-    <div class="panel">
-      <h2>Brugere</h2>
-      <table>
-        <thead><tr><th>Bruger</th><th>Status</th><th>Aktivitet</th><th>Handlinger</th></tr></thead>
-        <tbody id="userRows"></tbody>
-      </table>
-      <div class="msg" id="mUsers"></div>
-    </div>
-  </section>
-</div>
-
-<script>
-const API = window.API_URL;
-const $ = s => document.querySelector(s);
-const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const TEXT = ['firstName','lastName','title','company','phone','email','web','linkedin','address','note'];
+const SH_USERS = 'Brugere';
+const SH_CARDS = 'Kort';
+const U_HEAD = ['username','name','hash','salt','role','active','mustChange','created','lastLogin'];
+const C_HEAD = ['slug','firstName','lastName','title','company','phone','email','web','linkedin',
+                'address','note','color','updated','updatedBy','theme','photo',
+                'links','hidden','views','saves','lastView'];
+const TEXT_FIELDS = ['firstName','lastName','title','company','phone','email','web','linkedin','address','note'];
+const PUBLIC_FIELDS = ['slug','firstName','lastName','title','company','phone','email','web','linkedin',
+                       'address','note','color','theme','photo','links'];
 const FONTS = ['Archivo','Space Grotesk','IBM Plex Sans','Source Serif 4','Barlow Condensed'];
-const MAX_LINKS = 4;
-const PRESETS = {
-  staal: { name:'Stål',        bg:'#11140f', card:'#1a1f18', text:'#e6eae1', accent:'#b6e04a' },
-  hav:   { name:'Hav',         bg:'#0d1b24', card:'#13283a', text:'#e4eef4', accent:'#4cc3d9' },
-  nat:   { name:'Nat og guld', bg:'#0c0c0d', card:'#17171a', text:'#f1ede4', accent:'#d4a64a' },
-  skov:  { name:'Skov',        bg:'#0f1a14', card:'#16261d', text:'#e3ece5', accent:'#7fcf8f' },
-  lys:   { name:'Lys',         bg:'#e9edf0', card:'#ffffff', text:'#1c2329', accent:'#1f6f8b' },
-  signal:{ name:'Signal',      bg:'#f3f4f5', card:'#ffffff', text:'#16181b', accent:'#d7261e' },
-  rosa:  { name:'Rosa',        bg:'#f6eef1', card:'#ffffff', text:'#2a1d24', accent:'#b8467a' }
-};
-const T = {
-  en: { save:'Save contact', call:'Call', sms:'Text message', mail:'Email', web:'Website', addr:'Address',
-        share:'Share card', shareSub:'send the link', link:'Link', scan:'Scan the code to open this card on another phone.',
-        offline:'Showing saved version – no connection right now.', copied:'Link copied.', copy:'Copy the link:' },
-  da: { save:'Gem kontakt', call:'Ring', sms:'Send sms', mail:'Mail', web:'Hjemmeside', addr:'Adresse',
-        share:'Del kortet', shareSub:'send linket videre', link:'Link', scan:'Scan koden for at åbne kortet på en anden telefon.',
-        offline:'Viser gemt version – ingen forbindelse lige nu.', copied:'Linket er kopieret.', copy:'Kopiér linket:' }
-};
-let TOKEN = null, ME = null, EDIT = null, PHOTO = '', LAST_PW = '';
 
-/* ---------- lagring (egen nøgle, da alle bernt84.github.io-sider deler lager) ---------- */
-const ls = {
-  get(k){ try { return localStorage.getItem('visitkort:' + k); } catch(e){ return null; } },
-  set(k, v){ try { v == null ? localStorage.removeItem('visitkort:' + k) : localStorage.setItem('visitkort:' + k, v); } catch(e){} }
-};
+/* ================= Kør én gang ================= */
+// Opretter mappen "Visitkort" i Google Drive, regnearket i mappen,
+// arkene, din admin-bruger og den daglige backup. Kan køres igen uden skade.
+function setup() {
+  const folder = getFolder_();
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty('SHEET_ID');
+  let file = null;
+  if (id) { try { file = DriveApp.getFileById(id); if (file.isTrashed()) file = null; } catch (e) { file = null; } }
 
-function show(id){ document.querySelectorAll('[data-view]').forEach(v => v.hidden = v.id !== id); window.scrollTo(0,0); }
-function msg(id, text, ok){ const m = $(id); m.textContent = text || ''; m.className = 'msg ' + (text ? (ok ? 'ok' : 'err') : ''); }
-async function busy(btn, fn){ btn.disabled = true; try { await fn(); } finally { btn.disabled = false; } }
-
-/* ---------- server ---------- */
-function apiReady(){ return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API) && API.indexOf('INDSÆT') < 0; }
-
-async function call(action, p){
-  if (!apiReady()) throw new Error('API_URL er ikke sat i index.html.');
-  let res;
-  try {
-    res = await fetch(API, { method: 'POST', body: JSON.stringify({ action, token: TOKEN, p: p || {} }) });
-  } catch (e) { throw new Error('Ingen forbindelse til serveren. Tjek internettet og prøv igen.'); }
-  let j;
-  try { j = await res.json(); } catch (e) { throw new Error('Serveren svarede ikke korrekt. Tjek udrulningen (se README).'); }
-  if (!j.ok) {
-    const m = String(j.error || 'Ukendt fejl').replace(/^Error:\s*/, '');
-    if (m.indexOf('SESSION:') >= 0) { const clean = m.replace(/^.*SESSION:\s*/, ''); logoutLocal(clean); throw new Error(clean); }
-    throw new Error(m);
+  let isNew = false;
+  if (!file) {
+    const ss = SpreadsheetApp.create(CFG.SHEET_NAME);
+    id = ss.getId();
+    props.setProperty('SHEET_ID', id);
+    file = DriveApp.getFileById(id);
+    isNew = true;
   }
-  return j.data;
+  // sørg for at regnearket ligger i mappen
+  let inFolder = false;
+  const parents = file.getParents();
+  while (parents.hasNext()) if (parents.next().getId() === folder.getId()) inFolder = true;
+  if (!inFolder) file.moveTo(folder);
+
+  sheet_(SH_USERS, U_HEAD);
+  sheet_(SH_CARDS, C_HEAD);
+  if (isNew) {
+    const ss = ss_();
+    ss.getSheets().forEach(sh => {
+      if ([SH_USERS, SH_CARDS].indexOf(sh.getName()) < 0 && ss.getSheets().length > 2) ss.deleteSheet(sh);
+    });
+  }
+
+  if (!findUser_(CFG.FIRST_ADMIN)) {
+    createUserRow_(CFG.FIRST_ADMIN, 'Martin Bernt Christoffersen', 'admin', CFG.FIRST_ADMIN_PW);
+    const c = findCard_(CFG.FIRST_ADMIN);
+    c.title = 'QHSE Manager'; c.company = 'Nicon Industries'; c.address = 'Esbjerg, Denmark';
+    writeRow_(SH_CARDS, C_HEAD, c);
+  }
+  setupBackup_();
+  Logger.log('Mappe: %s', folder.getUrl());
+  Logger.log('Regneark: %s', ss_().getUrl());
+  Logger.log('Klar. Log ind som "%s" med "%s"', CFG.FIRST_ADMIN, CFG.FIRST_ADMIN_PW);
 }
 
-async function getPublic(slug, count){
-  const res = await fetch(API + '?c=' + encodeURIComponent(slug) + (count ? '' : '&count=0'));
-  return res.json();
+/* ================= Mappe og backup ================= */
+function getFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const fid = props.getProperty('FOLDER_ID');
+  if (fid) { try { const f = DriveApp.getFolderById(fid); if (!f.isTrashed()) return f; } catch (e) {} }
+  const found = DriveApp.getRootFolder().getFoldersByName(CFG.FOLDER_NAME);
+  const folder = found.hasNext() ? found.next() : DriveApp.getRootFolder().createFolder(CFG.FOLDER_NAME);
+  props.setProperty('FOLDER_ID', folder.getId());
+  return folder;
 }
 
-/* ---------- tema ---------- */
-const loadedFonts = { Archivo: true };
-function loadFont(f){
-  if (!f || loadedFonts[f]) return;
-  loadedFonts[f] = true;
-  const l = document.createElement('link');
-  l.rel = 'stylesheet';
-  l.href = 'https://fonts.googleapis.com/css2?family=' + f.replace(/ /g, '+') + ':wght@400;600;700&display=swap';
-  document.head.appendChild(l);
+function backupFolder_() {
+  const main = getFolder_();
+  const it = main.getFoldersByName('Backup');
+  return it.hasNext() ? it.next() : main.createFolder('Backup');
 }
-function rgba(hex, a){ const n = parseInt(hex.slice(1), 16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
-function onColor(hex){
-  const n = parseInt(hex.slice(1), 16);
-  const lin = v => { v /= 255; return v <= .03928 ? v/12.92 : Math.pow((v+.055)/1.055, 2.4); };
-  const L = .2126*lin(n>>16) + .7152*lin((n>>8)&255) + .0722*lin(n&255);
-  return L > .4 ? '#111111' : '#ffffff';
+
+// Daglig kopi af regnearket i Visitkort/Backup. Ældre kopier slettes.
+function backup() {
+  const folder = backupFolder_();
+  const stamp = Utilities.formatDate(new Date(), 'Europe/Copenhagen', 'yyyy-MM-dd');
+  const name = 'Visitkort backup ' + stamp;
+  const same = folder.getFilesByName(name);
+  while (same.hasNext()) same.next().setTrashed(true);
+  DriveApp.getFileById(ss_().getId()).makeCopy(name, folder);
+
+  const files = [];
+  const all = folder.getFiles();
+  while (all.hasNext()) {
+    const f = all.next();
+    if (f.getName().indexOf('Visitkort backup ') === 0) files.push(f);
+  }
+  files.sort((a, b) => b.getName().localeCompare(a.getName()));
+  files.slice(CFG.BACKUP_KEEP).forEach(f => f.setTrashed(true));
 }
-function resolveTheme(c){
-  let t = {};
-  try { t = JSON.parse((c && c.theme) || '{}'); } catch(e){}
-  const key = PRESETS[t.preset] ? t.preset : 'staal';
-  const p = PRESETS[key];
+
+function setupBackup_() {
+  const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'backup');
+  if (!exists) ScriptApp.newTrigger('backup').timeBased().everyDays(1).atHour(3).create();
+}
+
+/* ================= HTTP ================= */
+// GET  ?c=slug    -> kortets data som JSON (offentligt)
+// GET  ?vcf=slug  -> kontaktfil (offentligt)
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  try {
+    if (p.vcf) {
+      const c = publicCard_(p.vcf);
+      if (!c) return ContentService.createTextOutput('Card not found.');
+      bump_(c, 'saves');
+      return ContentService.createTextOutput(vcard_(c)).setMimeType(ContentService.MimeType.VCARD);
+    }
+    if (p.c) {
+      const c = publicCard_(p.c);
+      if (!c) return json_({ ok: false, error: 'Kortet findes ikke.' });
+      if (p.count !== '0') bump_(c, 'views');
+      return json_({ ok: true, data: cardOut_(c, true) });
+    }
+    return json_({ ok: true, data: 'visitkort-api' });
+  } catch (err) {
+    return json_({ ok: false, error: String(err.message || err) });
+  }
+}
+
+// POST body: {"action":"...","token":"...","p":{...}}   (Content-Type: text/plain)
+function doPost(e) {
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    return json_({ ok: true, data: api_(String(body.action || ''), body.token, body.p || {}) });
+  } catch (err) {
+    return json_({ ok: false, error: String(err.message || err) });
+  }
+}
+
+function json_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ================= API ================= */
+function api_(action, token, p) {
+  if (action === 'login') return login_(p.username, p.password);
+
+  const me = session_(token);
+  const isAdmin = me.role === 'admin';
+  const needAdmin = () => { if (!isAdmin) throw new Error('Kun administrator har adgang.'); };
+  if (me.mustChange === 'TRUE' && ['changePassword','logout','me'].indexOf(action) < 0)
+    throw new Error('Skift din adgangskode først.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    switch (action) {
+      case 'me': return pubUser_(me);
+
+      case 'logout':
+        CacheService.getScriptCache().remove('s_' + token);
+        return true;
+
+      case 'changePassword': {
+        if (hash_(p.oldPassword || '', me.salt) !== me.hash) throw new Error('Nuværende adgangskode er forkert.');
+        checkPw_(p.newPassword);
+        me.salt = Utilities.getUuid();
+        me.hash = hash_(p.newPassword, me.salt);
+        me.mustChange = 'FALSE';
+        writeRow_(SH_USERS, U_HEAD, me);
+        return pubUser_(me);
+      }
+
+      case 'getCard': {
+        const slug = clean_(p.slug) || me.username;
+        if (slug !== me.username) needAdmin();
+        const c = findCard_(slug);
+        if (!c) throw new Error('Kortet findes ikke.');
+        return cardOut_(c, false);
+      }
+
+      case 'saveCard': {
+        const slug = clean_(p.slug) || me.username;
+        if (slug !== me.username) needAdmin();
+        const c = findCard_(slug);
+        if (!c) throw new Error('Kortet findes ikke.');
+        const d = p.data || {};
+        TEXT_FIELDS.forEach(k => { c[k] = String(d[k] == null ? '' : d[k]).trim().slice(0, k === 'note' ? 500 : 200); });
+        if (!c.firstName && !c.lastName) throw new Error('Skriv mindst et navn.');
+        c.web = fixUrl_(c.web);
+        c.linkedin = fixLinkedIn_(c.linkedin);
+        if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) throw new Error('Mailadressen ser forkert ud.');
+        c.theme = cleanTheme_(d.theme);
+        c.links = cleanLinks_(d.links);
+        c.hidden = d.hidden ? 'TRUE' : 'FALSE';
+        if ('photo' in d) {
+          const ph = String(d.photo || '');
+          if (ph && (ph.indexOf('data:image/jpeg;base64,') !== 0 || ph.length > CFG.PHOTO_MAX))
+            throw new Error('Billedet kunne ikke gemmes. Prøv et andet billede.');
+          c.photo = ph;
+        }
+        c.updated = new Date().toISOString();
+        c.updatedBy = me.username;
+        writeRow_(SH_CARDS, C_HEAD, c);
+        return cardOut_(c, false);
+      }
+
+      case 'listUsers': {
+        needAdmin();
+        const cards = {};
+        rows_(SH_CARDS, C_HEAD).forEach(c => cards[c.slug] = c);
+        return rows_(SH_USERS, U_HEAD).map(u => {
+          const o = pubUser_(u);
+          const c = cards[u.username] || {};
+          o.title = c.title || '';
+          o.hasPhoto = !!c.photo;
+          o.hidden = c.hidden === 'TRUE';
+          o.views = Number(c.views || 0);
+          o.saves = Number(c.saves || 0);
+          o.publicUrl = publicUrl_(u.username);
+          return o;
+        });
+      }
+
+      case 'createUser': {
+        needAdmin();
+        const username = clean_(p.username);
+        if (!/^[a-z0-9-]{2,30}$/.test(username)) throw new Error('Brugernavn: 2-30 tegn, kun a-z, 0-9 og bindestreg.');
+        if (findUser_(username)) throw new Error('Brugernavnet findes allerede.');
+        const name = String(p.name || '').trim().slice(0, 100);
+        if (!name) throw new Error('Skriv brugerens navn.');
+        const pw = tempPw_();
+        createUserRow_(username, name, p.role === 'admin' ? 'admin' : 'user', pw);
+        return { username: username, tempPassword: pw, loginUrl: CFG.PUBLIC_BASE };
+      }
+
+      case 'updateUser': {
+        needAdmin();
+        const u = findUser_(clean_(p.username));
+        if (!u) throw new Error('Brugeren findes ikke.');
+        const self = u.username === me.username;
+        if ('role' in p) {
+          if (self && p.role !== 'admin') throw new Error('Du kan ikke fjerne din egen admin-rolle.');
+          u.role = p.role === 'admin' ? 'admin' : 'user';
+        }
+        if ('active' in p) {
+          if (self && !p.active) throw new Error('Du kan ikke deaktivere dig selv.');
+          u.active = p.active ? 'TRUE' : 'FALSE';
+          if (!p.active) killSessions_(u.username);
+        }
+        if ('name' in p && String(p.name).trim()) u.name = String(p.name).trim().slice(0, 100);
+        writeRow_(SH_USERS, U_HEAD, u);
+        return pubUser_(u);
+      }
+
+      case 'resetPassword': {
+        needAdmin();
+        const u = findUser_(clean_(p.username));
+        if (!u) throw new Error('Brugeren findes ikke.');
+        const pw = tempPw_();
+        u.salt = Utilities.getUuid();
+        u.hash = hash_(pw, u.salt);
+        u.mustChange = 'TRUE';
+        writeRow_(SH_USERS, U_HEAD, u);
+        killSessions_(u.username);
+        CacheService.getScriptCache().remove('f_' + u.username);
+        return { username: u.username, tempPassword: pw, loginUrl: CFG.PUBLIC_BASE };
+      }
+
+      case 'resetStats': {
+        needAdmin();
+        const c = findCard_(clean_(p.username));
+        if (!c) throw new Error('Kortet findes ikke.');
+        setCell_(SH_CARDS, C_HEAD, c._row, 'views', '0');
+        setCell_(SH_CARDS, C_HEAD, c._row, 'saves', '0');
+        return true;
+      }
+
+      case 'deleteUser': {
+        needAdmin();
+        const name = clean_(p.username);
+        if (name === me.username) throw new Error('Du kan ikke slette dig selv.');
+        const u = findUser_(name);
+        if (!u) throw new Error('Brugeren findes ikke.');
+        const c = findCard_(name);
+        if (c) sheet_(SH_CARDS, C_HEAD).deleteRow(c._row);
+        sheet_(SH_USERS, U_HEAD).deleteRow(u._row);
+        killSessions_(name);
+        return true;
+      }
+    }
+    throw new Error('Ukendt handling: ' + action);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ================= Login & sessioner ================= */
+function login_(username, pw) {
+  username = clean_(username);
+  const cache = CacheService.getScriptCache();
+  const fk = 'f_' + username;
+  const fails = Number(cache.get(fk) || 0);
+  if (fails >= CFG.MAX_FAIL) throw new Error('For mange forkerte forsøg. Prøv igen om 15 minutter.');
+
+  const u = findUser_(username);
+  const ok = u && u.active === 'TRUE' && hash_(pw || '', u.salt) === u.hash;
+  if (!ok) {
+    if (!u) hash_(pw || '', 'x'); // samme svartid uanset om brugeren findes
+    cache.put(fk, String(fails + 1), CFG.LOCK_SEC);
+    throw new Error('Forkert brugernavn eller adgangskode.');
+  }
+  cache.remove(fk);
+  const token = Utilities.getUuid() + Utilities.getUuid();
+  cache.put('s_' + token, username, CFG.SESSION_SEC);
+  const props = PropertiesService.getScriptProperties();
+  const list = JSON.parse(props.getProperty('sess_' + username) || '[]').slice(-9);
+  list.push(token);
+  props.setProperty('sess_' + username, JSON.stringify(list));
+  setCell_(SH_USERS, U_HEAD, u._row, 'lastLogin', new Date().toISOString());
+  return { token: token, user: pubUser_(u) };
+}
+
+function session_(token) {
+  if (!token) throw new Error('SESSION: Log ind igen.');
+  const cache = CacheService.getScriptCache();
+  const name = cache.get('s_' + token);
+  if (!name) throw new Error('SESSION: Du er logget ud. Log ind igen.');
+  const u = findUser_(name);
+  if (!u || u.active !== 'TRUE') throw new Error('SESSION: Brugeren er deaktiveret.');
+  cache.put('s_' + token, name, CFG.SESSION_SEC);
+  return u;
+}
+
+function killSessions_(username) {
+  const props = PropertiesService.getScriptProperties();
+  const list = JSON.parse(props.getProperty('sess_' + username) || '[]');
+  const cache = CacheService.getScriptCache();
+  list.forEach(t => cache.remove('s_' + t));
+  props.deleteProperty('sess_' + username);
+}
+
+function hash_(pw, salt) {
+  let h = salt + '|' + pw;
+  for (let i = 0; i < 300; i++) {
+    h = Utilities.base64Encode(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h, Utilities.Charset.UTF_8));
+  }
+  return h;
+}
+function checkPw_(pw) {
+  if (!pw || String(pw).length < 8) throw new Error('Adgangskoden skal være mindst 8 tegn.');
+}
+function tempPw_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 10); }
+
+/* ================= Data ================= */
+const _checked = {};
+let _ss = null;
+function ss_() {
+  if (_ss) return _ss;
+  const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) throw new Error('Systemet er ikke sat op. Kør setup i Apps Script.');
+  _ss = SpreadsheetApp.openById(id);
+  return _ss;
+}
+
+function sheet_(name, head) {
+  const ss = ss_();
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    if (sh.getMaxColumns() < head.length) sh.insertColumnsAfter(sh.getMaxColumns(), head.length - sh.getMaxColumns());
+    sh.getRange(1, 1, sh.getMaxRows(), head.length).setNumberFormat('@'); // alt som tekst (+45 osv.)
+    sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    _checked[name] = true;
+  } else if (!_checked[name]) {
+    // Tilføj nye kolonner til ældre ark (opgradering)
+    const cur = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0].map(String).filter(String);
+    const missing = head.filter(k => cur.indexOf(k) < 0);
+    if (missing.length) {
+      const start = cur.length + 1;
+      const needCols = start + missing.length - 1 - sh.getMaxColumns();
+      if (needCols > 0) sh.insertColumnsAfter(sh.getMaxColumns(), needCols);
+      sh.getRange(1, start, sh.getMaxRows(), missing.length).setNumberFormat('@');
+      sh.getRange(1, start, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    }
+    _checked[name] = true;
+  }
+  return sh;
+}
+
+function header_(sh) { return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String); }
+
+function rows_(name, head) {
+  const v = sheet_(name, head).getDataRange().getValues();
+  const h = v.shift().map(String);
+  return v.map((r, i) => {
+    const o = { _row: i + 2 };
+    h.forEach((k, j) => { if (k) o[k] = String(r[j]); });
+    return o;
+  }).filter(o => o[h[0]] !== '');
+}
+
+function writeRow_(name, head, obj) {
+  const sh = sheet_(name, head);
+  const h = header_(sh);
+  const row = h.map(k => (!k || obj[k] == null) ? '' : String(obj[k]));
+  const r = obj._row || sh.getLastRow() + 1;
+  sh.getRange(r, 1, 1, h.length).setNumberFormat('@').setValues([row]);
+  obj._row = r;
+}
+
+function setCell_(name, head, row, key, value) {
+  const sh = sheet_(name, head);
+  const col = header_(sh).indexOf(key) + 1;
+  if (col > 0) sh.getRange(row, col).setNumberFormat('@').setValue(String(value));
+}
+
+function bump_(c, key) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return; // tællinger må gerne springes over ved travlhed
+  try {
+    const sh = sheet_(SH_CARDS, C_HEAD);
+    const h = header_(sh);
+    const col = h.indexOf(key) + 1;
+    if (col < 1) return;
+    const cell = sh.getRange(c._row, col);
+    cell.setNumberFormat('@').setValue(String(Number(cell.getValue() || 0) + 1));
+    if (key === 'views') setCell_(SH_CARDS, C_HEAD, c._row, 'lastView', new Date().toISOString());
+  } finally { lock.releaseLock(); }
+}
+
+function findUser_(username) { return rows_(SH_USERS, U_HEAD).filter(u => u.username === username)[0] || null; }
+function findCard_(slug) { return rows_(SH_CARDS, C_HEAD).filter(c => c.slug === slug)[0] || null; }
+function publicCard_(slug) {
+  slug = clean_(slug);
+  const u = findUser_(slug);
+  if (!u || u.active !== 'TRUE') return null;
+  const c = findCard_(slug);
+  return c && c.hidden !== 'TRUE' ? c : null;
+}
+
+function createUserRow_(username, name, role, pw) {
+  const salt = Utilities.getUuid();
+  writeRow_(SH_USERS, U_HEAD, {
+    username: username, name: name, hash: hash_(pw, salt), salt: salt, role: role,
+    active: 'TRUE', mustChange: 'TRUE', created: new Date().toISOString(), lastLogin: ''
+  });
+  const parts = name.split(/\s+/);
+  const last = parts.length > 1 ? parts.pop() : '';
+  writeRow_(SH_CARDS, C_HEAD, {
+    slug: username, firstName: parts.join(' '), lastName: last, theme: '', photo: '', links: '[]',
+    hidden: 'FALSE', views: '0', saves: '0', updated: new Date().toISOString(), updatedBy: username
+  });
+}
+
+function pubUser_(u) {
+  return { username: u.username, name: u.name, role: u.role,
+           active: u.active === 'TRUE', mustChange: u.mustChange === 'TRUE', lastLogin: u.lastLogin };
+}
+
+function cardOut_(c, isPublic) {
+  const o = {};
+  (isPublic ? PUBLIC_FIELDS : C_HEAD).forEach(k => o[k] = c[k] || '');
+  o.hidden = c.hidden === 'TRUE';
+  if (!isPublic) { o.views = Number(c.views || 0); o.saves = Number(c.saves || 0); }
+  o.publicUrl = publicUrl_(c.slug);
+  o.vcfUrl = ScriptApp.getService().getUrl() + '?vcf=' + encodeURIComponent(c.slug);
+  return o;
+}
+
+function publicUrl_(slug) { return CFG.PUBLIC_BASE + '?c=' + encodeURIComponent(slug); }
+
+function cleanTheme_(t) {
+  try { t = typeof t === 'string' ? JSON.parse(t || '{}') : (t || {}); } catch (e) { t = {}; }
   const hex = v => /^#[0-9a-f]{6}$/i.test(v || '') ? v : '';
-  return {
-    preset: t.preset || key,
-    bg: hex(t.bg) || p.bg, card: hex(t.card) || p.card, text: hex(t.text) || p.text,
-    accent: hex(t.accent) || hex(c && c.color) || p.accent,
-    font: FONTS.indexOf(t.font) >= 0 ? t.font : 'Archivo',
+  return JSON.stringify({
+    preset: String(t.preset || '').replace(/[^a-z]/g, '').slice(0, 20),
+    bg: hex(t.bg), card: hex(t.card), text: hex(t.text), accent: hex(t.accent),
+    font: FONTS.indexOf(t.font) >= 0 ? t.font : '',
     shape: t.shape === 'square' ? 'square' : 'round',
     layout: t.layout === 'top' ? 'top' : 'side',
     lang: t.lang === 'da' ? 'da' : 'en'
-  };
-}
-function applyTheme(el, t){
-  loadFont(t.font);
-  const s = el.style;
-  s.setProperty('--bg', t.bg); s.setProperty('--card', t.card); s.setProperty('--tx', t.text);
-  s.setProperty('--mu', rgba(t.text, .68)); s.setProperty('--ln', rgba(t.text, .16));
-  s.setProperty('--acc', t.accent); s.setProperty('--on', onColor(t.accent));
-  s.setProperty('--ff', `'${t.font}', system-ui, -apple-system, sans-serif`);
+  });
 }
 
-/* ---------- kort-visning ---------- */
-function parseLinks(v){ try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch(e){ return []; } }
-const okUrl = u => /^https?:\/\//i.test(u || '');
-const short = u => String(u).replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
-const fullName = c => [c.firstName, c.lastName].filter(Boolean).join(' ');
-
-function cardHtml(c, t){
-  const photo = c.photo ? `<img class="ph ${t.shape}" src="${esc(c.photo)}" alt="">` : '';
-  return `<div class="vcard lay-${t.layout}">${photo}<div class="cb">
-    ${c.company ? `<div class="co">${esc(c.company)}</div>` : ''}
-    <div class="nm">${esc(fullName(c) || 'Dit navn')}</div>
-    ${c.title ? `<div class="ti">${esc(c.title)}</div>` : ''}
-    ${c.note ? `<div class="nt">${esc(c.note)}</div>` : ''}
-  </div></div>`;
-}
-function linksHtml(c, lang){
-  const t = T[lang] || T.en;
-  const L = [];
-  const tel = c.phone ? esc(c.phone.replace(/[^\d+]/g,'')) : '';
-  L.push(`<a class="primary" href="${esc(c.vcfUrl || '#')}">${t.save}</a>`);
-  if (c.phone) L.push(`<a href="tel:${tel}">${t.call} <span>${esc(c.phone)}</span></a>`);
-  if (c.phone) L.push(`<a href="sms:${tel}">${t.sms} <span>${esc(c.phone)}</span></a>`);
-  if (c.email) L.push(`<a href="mailto:${esc(c.email)}">${t.mail} <span>${esc(c.email)}</span></a>`);
-  if (okUrl(c.linkedin)) L.push(`<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn <span>${esc(short(c.linkedin).replace(/^linkedin\.com\/in\//i,''))}</span></a>`);
-  if (okUrl(c.web)) L.push(`<a href="${esc(c.web)}" target="_blank" rel="noopener">${t.web} <span>${esc(short(c.web))}</span></a>`);
-  parseLinks(c.links).forEach(l => { if (okUrl(l.url)) L.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || t.link)} <span>${esc(short(l.url))}</span></a>`); });
-  if (c.address) L.push(`<a href="https://maps.apple.com/?q=${encodeURIComponent(c.address)}" target="_blank" rel="noopener">${t.addr} <span>${esc(c.address)}</span></a>`);
-  L.push(`<button type="button" data-share>${t.share} <span>${t.shareSub}</span></button>`);
-  return L.join('');
-}
-function drawQr(el, url){
-  el.innerHTML = '';
-  if (!url) return;
-  if (!window.QRCode) { el.innerHTML = '<span style="color:#111;font-size:.75rem;line-height:1.3;display:block;width:120px">QR code unavailable offline</span>'; return; }
-  new QRCode(el, { text: url, width: 600, height: 600, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
-}
-async function shareCard(c, lang){
-  const t = T[lang] || T.en;
-  const data = { title: fullName(c), text: [fullName(c), c.title, c.company].filter(Boolean).join(' – '), url: c.publicUrl };
-  if (navigator.share) { try { await navigator.share(data); } catch(e){} return; }
-  try { await navigator.clipboard.writeText(c.publicUrl); alert(t.copied); }
-  catch(e){ prompt(t.copy, c.publicUrl); }
+function cleanLinks_(list) {
+  try { list = typeof list === 'string' ? JSON.parse(list || '[]') : (list || []); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  return JSON.stringify(list
+    .map(l => ({ label: String((l && l.label) || '').trim().slice(0, 40), url: fixUrl_((l && l.url) || '') }))
+    .filter(l => l.url && /^https?:\/\/[^\s]+\.[^\s]+/i.test(l.url))
+    .map(l => ({ label: l.label || l.url.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0], url: l.url.slice(0, 300) }))
+    .slice(0, CFG.MAX_LINKS));
 }
 
-/* ---------- offentlig visning ---------- */
-function renderPublic(c, offline){
-  const t = resolveTheme(c);
-  document.body.classList.add('public');
-  applyTheme($('#vPublic'), t);
-  document.body.style.background = document.documentElement.style.background = t.bg;
-  document.querySelector('meta[name=theme-color]').content = t.bg;
-  document.title = [fullName(c), c.title].filter(Boolean).join(' – ') || 'Business card';
-  document.documentElement.lang = t.lang;
-  $('#pubCard').innerHTML = cardHtml(c, t);
-  $('#pubLinks').innerHTML = linksHtml(c, t.lang);
-  $('#pubLinks [data-share]').onclick = () => shareCard(c, t.lang);
-  $('#pubScan').textContent = T[t.lang].scan;
-  $('#pubOffline').textContent = T[t.lang].offline;
-  $('#pubOffline').hidden = !offline;
-  drawQr($('#pubQr'), c.publicUrl);
-  show('vPublic');
+function clean_(s) { return String(s || '').trim().toLowerCase(); }
+
+function fixUrl_(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (/^(javascript|data|vbscript):/i.test(u)) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  return u;
 }
-async function startPublic(slug){
-  const cached = ls.get('card:' + slug);
-  if (cached) { try { renderPublic(JSON.parse(cached), false); } catch(e){} }
-  try {
-    const j = await getPublic(slug, true);
-    if (j.ok) { ls.set('card:' + slug, JSON.stringify(j.data)); renderPublic(j.data, false); }
-    else { ls.set('card:' + slug, null); document.body.classList.remove('public'); show('vMissing'); }
-  } catch (e) {
-    if (cached) { $('#pubOffline').hidden = false; }
-    else { $('#missingTitle').textContent = 'No connection'; $('#missingText').textContent = 'The card could not be loaded. Check your internet connection and try again.'; show('vMissing'); }
+function fixLinkedIn_(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (!/linkedin\.com/i.test(u)) u = 'https://www.linkedin.com/in/' + u.replace(/^@/, '').replace(/^\/+/, '');
+  return fixUrl_(u);
+}
+
+/* ================= vCard ================= */
+function vcard_(c) {
+  const e = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
+  const L = ['BEGIN:VCARD', 'VERSION:3.0',
+    'N:' + e(c.lastName) + ';' + e(c.firstName) + ';;;',
+    'FN:' + e([c.firstName, c.lastName].join(' ').trim())];
+  if (c.company) L.push('ORG:' + e(c.company));
+  if (c.title) L.push('TITLE:' + e(c.title));
+  if (c.phone) L.push('TEL;TYPE=CELL,VOICE:' + c.phone.replace(/[^\d+]/g, ''));
+  if (c.email) L.push('EMAIL;TYPE=INTERNET,WORK:' + c.email);
+  if (c.web) L.push('URL;TYPE=WORK:' + c.web);
+  let n = 1;
+  if (c.linkedin) {
+    L.push('item' + n + '.URL:' + c.linkedin, 'item' + n + '.X-ABLabel:LinkedIn');
+    L.push('X-SOCIALPROFILE;TYPE=linkedin:' + c.linkedin);
+    n++;
   }
-}
-
-/* ---------- vis/skjul kode ---------- */
-document.addEventListener('click', e => {
-  const b = e.target.closest('button[data-toggle]'); if (!b) return;
-  const i = document.getElementById(b.dataset.toggle);
-  const hide = i.type === 'text';
-  i.type = hide ? 'password' : 'text';
-  b.textContent = hide ? 'Vis' : 'Skjul';
-});
-
-/* ---------- login ---------- */
-$('#fLogin').addEventListener('submit', e => {
-  e.preventDefault();
-  msg('#mLogin', '');
-  busy(e.target.querySelector('button.go'), async () => {
-    try {
-      LAST_PW = $('#lp').value;
-      const r = await call('login', { username: $('#lu').value, password: $('#lp').value });
-      TOKEN = r.token; ls.set('token', TOKEN); ME = r.user;
-      $('#lp').value = '';
-      afterLogin();
-    } catch (err) { msg('#mLogin', err.message); }
+  JSON.parse(c.links || '[]').forEach(l => {
+    L.push('item' + n + '.URL:' + l.url, 'item' + n + '.X-ABLabel:' + e(l.label));
+    n++;
   });
-});
-
-function afterLogin(){
-  if (ME.mustChange) { openPw(true); return; }
-  LAST_PW = '';
-  $('#who').textContent = ME.name || ME.username;
-  $('#whoSub').textContent = ME.username + (ME.role === 'admin' ? ' · administrator' : '');
-  $('#tabUsers').hidden = ME.role !== 'admin';
-  show('vApp');
-  tab('edit');
-  loadCard(ME.username);
-}
-
-function logoutLocal(reason){
-  TOKEN = null; ME = null; ls.set('token', null);
-  show('vLogin');
-  if (reason) msg('#mLogin', reason);
-}
-$('#bOut').addEventListener('click', async () => { try { await call('logout'); } catch(e){} logoutLocal(); });
-
-/* ---------- adgangskode ---------- */
-function openPw(forced){
-  $('#pwInfo').textContent = forced ? 'Vælg din egen adgangskode, før du fortsætter. Mindst 8 tegn.' : 'Mindst 8 tegn.';
-  $('#oldWrap').hidden = forced && !!LAST_PW;
-  $('#po').value = forced ? LAST_PW : '';
-  $('#pwCancel').hidden = forced;
-  $('#pn').value = $('#pn2').value = '';
-  msg('#mPw', '');
-  show('vPw');
-}
-$('#bPw').addEventListener('click', () => openPw(false));
-$('#pwCancel').addEventListener('click', () => show('vApp'));
-$('#fPw').addEventListener('submit', e => {
-  e.preventDefault();
-  if ($('#pn').value !== $('#pn2').value) { msg('#mPw', 'De to nye adgangskoder er ikke ens.'); return; }
-  busy(e.target.querySelector('button.go'), async () => {
-    try {
-      ME = await call('changePassword', { oldPassword: $('#po').value, newPassword: $('#pn').value });
-      afterLogin();
-    } catch (err) { msg('#mPw', err.message); }
-  });
-});
-
-/* ---------- faner ---------- */
-function tab(name){
-  document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tab === name));
-  $('#tEdit').hidden = name !== 'edit';
-  $('#tUsers').hidden = name !== 'users';
-  if (name === 'users') loadUsers();
-}
-$('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (b) tab(b.dataset.tab); });
-
-/* ---------- tema-editor ---------- */
-$('#t_font').innerHTML = FONTS.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
-$('#presets').innerHTML = Object.keys(PRESETS).map(k => {
-  const p = PRESETS[k];
-  return `<button type="button" class="sm" data-p="${k}" aria-pressed="false">
-    <span class="sw" style="background:${p.card};border:1px solid ${rgba(p.text,.25)}"><i style="background:${p.accent}"></i></span>${esc(p.name)}</button>`;
-}).join('');
-$('#presets').addEventListener('click', e => {
-  const b = e.target.closest('button[data-p]'); if (!b) return;
-  const p = PRESETS[b.dataset.p];
-  $('#t_bg').value = p.bg; $('#t_card').value = p.card; $('#t_text').value = p.text; $('#t_accent').value = p.accent;
-  markPreset(b.dataset.p);
-  preview();
-});
-function markPreset(key){ document.querySelectorAll('#presets button').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === key)); }
-function readTheme(){
-  const t = { bg: $('#t_bg').value, card: $('#t_card').value, text: $('#t_text').value, accent: $('#t_accent').value,
-              font: $('#t_font').value, shape: $('#t_shape').value, layout: $('#t_layout').value, lang: $('#t_lang').value };
-  const match = Object.keys(PRESETS).find(k => { const p = PRESETS[k];
-    return p.bg === t.bg && p.card === t.card && p.text === t.text && p.accent === t.accent; });
-  t.preset = match || 'egen';
-  return t;
-}
-
-/* ---------- ekstra links ---------- */
-function addLinkRow(l){
-  if ($('#linkRows').children.length >= MAX_LINKS) return;
-  const d = document.createElement('div');
-  d.className = 'linkrow';
-  d.innerHTML = `<input placeholder="Navn, fx Instagram" maxlength="40" aria-label="Linkets navn" value="${esc(l && l.label)}">
-    <input placeholder="instagram.com/dit-navn" autocapitalize="none" autocorrect="off" aria-label="Adresse" value="${esc(l && l.url)}">
-    <button type="button" class="sm" aria-label="Fjern link">Fjern</button>`;
-  d.querySelector('button').onclick = () => { d.remove(); updateLinkBtn(); preview(); };
-  $('#linkRows').appendChild(d);
-  updateLinkBtn();
-}
-function updateLinkBtn(){ $('#addLink').hidden = $('#linkRows').children.length >= MAX_LINKS; }
-function readLinks(){
-  return [...$('#linkRows').children].map(r => {
-    const [a, b] = r.querySelectorAll('input');
-    let url = b.value.trim();
-    if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
-    return { label: a.value.trim(), url };
-  }).filter(l => l.url);
-}
-$('#addLink').addEventListener('click', () => { addLinkRow(); $('#linkRows').lastElementChild.querySelector('input').focus(); });
-
-/* ---------- profilbillede ---------- */
-function readFile(file){
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = () => rej(new Error('Filen kunne ikke læses.'));
-    r.readAsDataURL(file);
-  });
-}
-async function makePhoto(file){
-  const src = await readFile(file);
-  const img = await new Promise((res, rej) => {
-    const i = new Image();
-    i.onload = () => res(i);
-    i.onerror = () => rej(new Error('Billedet kunne ikke åbnes. Prøv et JPG- eller PNG-billede.'));
-    i.src = src;
-  });
-  const w = img.naturalWidth, h = img.naturalHeight, s = Math.min(w, h);
-  for (const size of [360, 300, 240, 180]) {
-    for (const q of [0.86, 0.76, 0.66, 0.56]) {
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = size;
-      const x = cv.getContext('2d');
-      x.fillStyle = '#ffffff'; x.fillRect(0, 0, size, size);
-      x.imageSmoothingQuality = 'high';
-      x.drawImage(img, (w - s) / 2, (h - s) / 2, s, s, 0, 0, size, size);
-      const d = cv.toDataURL('image/jpeg', q);
-      if (d.length <= 45000) return d;
-    }
+  let lang = 'en';
+  try { lang = JSON.parse(c.theme || '{}').lang === 'da' ? 'da' : 'en'; } catch (err) {}
+  L.push('item' + n + '.URL:' + publicUrl_(c.slug), 'item' + n + '.X-ABLabel:' + (lang === 'da' ? 'Visitkort' : 'Business card'));
+  if (c.address) L.push('ADR;TYPE=WORK:;;' + e(c.address) + ';;;;');
+  if (c.note) L.push('NOTE:' + e(c.note));
+  if (c.photo && c.photo.indexOf('data:image/jpeg;base64,') === 0) {
+    L.push(fold_('PHOTO;ENCODING=b;TYPE=JPEG:' + c.photo.split(',')[1]));
   }
-  throw new Error('Billedet kunne ikke gøres småt nok. Prøv et andet.');
-}
-function setPhoto(p){
-  PHOTO = p || '';
-  $('#photoThumb').hidden = !PHOTO;
-  if (PHOTO) $('#photoThumb').src = PHOTO;
-  $('#photoDel').hidden = !PHOTO;
-  preview();
-}
-$('#photoIn').addEventListener('change', async e => {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (!f) return;
-  msg('#mCard', 'Behandler billede…', true);
-  try { setPhoto(await makePhoto(f)); msg('#mCard', 'Billedet er klar. Tryk "Gem kort".', true); }
-  catch (err) { msg('#mCard', err.message); }
-});
-$('#photoDel').addEventListener('click', () => { setPhoto(''); msg('#mCard', 'Billedet fjernes, når du trykker "Gem kort".', true); });
-
-/* ---------- redigér kort ---------- */
-function formData(){
-  const d = {};
-  TEXT.forEach(k => d[k] = $('#c_' + k).value);
-  d.photo = PHOTO;
-  d.theme = JSON.stringify(readTheme());
-  d.links = readLinks();
-  d.hidden = $('#c_hidden').checked;
-  return d;
-}
-function preview(){
-  if (!EDIT) return;
-  const f = formData();
-  const d = Object.assign({}, EDIT, f, { links: JSON.stringify(f.links) });
-  if (d.linkedin && !okUrl(d.linkedin)) d.linkedin = 'https://www.linkedin.com/in/' + d.linkedin;
-  if (d.web && !okUrl(d.web)) d.web = 'https://' + d.web;
-  const t = resolveTheme(d);
-  applyTheme($('#prevWrap'), t);
-  $('#prevCard').innerHTML = cardHtml(d, t);
-  $('#prevLinks').innerHTML = linksHtml(d, t.lang);
-  $('#prevLinks').querySelectorAll('a,button').forEach(a => a.addEventListener('click', ev => ev.preventDefault()));
-}
-$('#fCard').addEventListener('input', e => {
-  if (['t_bg','t_card','t_text','t_accent'].indexOf(e.target.id) >= 0) markPreset(readTheme().preset);
-  preview();
-});
-
-async function loadCard(slug){
-  msg('#mCard', 'Henter…', true);
-  try { fillCard(await call('getCard', { slug })); msg('#mCard', ''); }
-  catch (err) { msg('#mCard', err.message); }
-}
-function fillCard(c){
-  EDIT = c;
-  TEXT.forEach(k => $('#c_' + k).value = c[k] || '');
-  const t = resolveTheme(c);
-  $('#t_bg').value = t.bg; $('#t_card').value = t.card; $('#t_text').value = t.text; $('#t_accent').value = t.accent;
-  $('#t_font').value = t.font; $('#t_shape').value = t.shape; $('#t_layout').value = t.layout; $('#t_lang').value = t.lang;
-  markPreset(readTheme().preset);
-  $('#c_hidden').checked = !!c.hidden;
-  $('#linkRows').innerHTML = '';
-  parseLinks(c.links).forEach(addLinkRow);
-  updateLinkBtn();
-  const other = ME && c.slug !== ME.username;
-  $('#editingOther').hidden = !other;
-  $('#editingOther').innerHTML = other ? `Du redigerer kortet for <b>${esc(fullName(c) || c.slug)}</b>.` : '';
-  $('#bBackMine').hidden = !other;
-  $('#shareUrl').value = c.publicUrl;
-  $('#bOpen').href = c.publicUrl;
-  $('#stViews').textContent = c.views || 0;
-  $('#stSaves').textContent = c.saves || 0;
-  drawQr($('#prevQr'), c.publicUrl);
-  setPhoto(c.photo);
-}
-$('#bBackMine').addEventListener('click', () => loadCard(ME.username));
-
-$('#fCard').addEventListener('submit', e => {
-  e.preventDefault();
-  busy(e.target.querySelector('button.go'), async () => {
-    try {
-      msg('#mCard', 'Gemmer…', true);
-      const c = await call('saveCard', { slug: EDIT.slug, data: formData() });
-      fillCard(c);
-      ls.set('card:' + c.slug, null);
-      msg('#mCard', c.hidden ? 'Kortet er gemt. Det er skjult for andre.' : 'Kortet er gemt.', true);
-    } catch (err) { msg('#mCard', err.message); }
-  });
-});
-
-$('#bCopy').addEventListener('click', async () => {
-  const i = $('#shareUrl');
-  try { await navigator.clipboard.writeText(i.value); }
-  catch (e) { i.select(); i.setSelectionRange(0, 9999); try { document.execCommand('copy'); } catch(_){} }
-  msg('#mCard', 'Linket er kopieret.', true);
-});
-$('#bQr').addEventListener('click', () => {
-  const cv = $('#prevQr canvas');
-  if (!cv) return;
-  const out = document.createElement('canvas');
-  const pad = 40;
-  out.width = out.height = cv.width + pad * 2;
-  const x = out.getContext('2d');
-  x.fillStyle = '#fff'; x.fillRect(0, 0, out.width, out.height);
-  x.drawImage(cv, pad, pad);
-  const a = document.createElement('a');
-  a.href = out.toDataURL('image/png');
-  a.download = 'qr-' + EDIT.slug + '.png';
-  document.body.appendChild(a); a.click(); a.remove();
-});
-
-/* ---------- brugere (admin) ---------- */
-async function loadUsers(){
-  msg('#mUsers', 'Henter…', true);
-  try {
-    const list = await call('listUsers');
-    $('#userRows').innerHTML = list.map(u => {
-      const self = u.username === ME.username;
-      const last = u.lastLogin ? new Date(u.lastLogin).toLocaleString('da-DK', {dateStyle:'short', timeStyle:'short'}) : 'aldrig';
-      return `<tr data-u="${esc(u.username)}">
-        <td><b>${esc(u.name || u.username)}</b><div class="muted mono">${esc(u.username)}</div>${u.title ? `<div class="muted">${esc(u.title)}</div>` : ''}</td>
-        <td>${u.role === 'admin' ? '<span class="tag admin">admin</span>' : '<span class="tag">bruger</span>'}${u.active ? '' : '<span class="tag off">deaktiveret</span>'}${u.hidden ? '<span class="tag off">kort skjult</span>' : ''}${u.mustChange ? '<span class="tag">mangler egen kode</span>' : ''}${u.hasPhoto ? '' : '<span class="tag">intet billede</span>'}</td>
-        <td class="muted">${u.views} visninger · ${u.saves} gemt<br>Login: ${last}</td>
-        <td><div class="acts">
-          <button class="sm" data-a="edit">Redigér kort</button>
-          <a class="fbtn sm" href="${esc(u.publicUrl)}" target="_blank" rel="noopener">Åbn</a>
-          <button class="sm" data-a="reset">Nulstil kode</button>
-          <button class="sm" data-a="stats">Nulstil tal</button>
-          ${self ? '' : `<button class="sm" data-a="role" data-v="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Fjern admin' : 'Gør til admin'}</button>
-          <button class="sm" data-a="active" data-v="${u.active ? '0' : '1'}">${u.active ? 'Deaktivér' : 'Aktivér'}</button>
-          <button class="sm danger" data-a="delete">Slet</button>`}
-        </div></td></tr>`;
-    }).join('');
-    msg('#mUsers', '');
-  } catch (err) { msg('#mUsers', err.message); }
+  L.push('REV:' + new Date().toISOString());
+  L.push('END:VCARD');
+  return L.join('\r\n') + '\r\n';
 }
 
-function showPw(r, what){
-  const box = $('#newPwBox');
-  const text = `Login: ${r.loginUrl}\nBrugernavn: ${r.username}\nKode: ${r.tempPassword}\n\nDu vælger din egen kode første gang, du logger ind.`;
-  box.hidden = false;
-  box.innerHTML = `<b>${esc(what)}</b><br>Brugernavn: <span class="mono">${esc(r.username)}</span><br>Midlertidig kode: <span class="mono">${esc(r.tempPassword)}</span><br>
-    <span class="muted">Koden vises kun nu. Brugeren vælger sin egen kode ved første login.</span>
-    <div class="row"><button class="sm go" type="button" id="sendPw">Send til brugeren</button><button class="sm" type="button" id="closePw">Luk</button></div>`;
-  $('#sendPw').onclick = async () => {
-    if (navigator.share) { try { await navigator.share({ title: 'Login til visitkort', text }); } catch(e){} }
-    else { try { await navigator.clipboard.writeText(text); $('#sendPw').textContent = 'Kopieret'; } catch(e){ prompt('Kopiér:', text); } }
-  };
-  $('#closePw').onclick = () => { box.hidden = true; box.innerHTML = ''; };
-  window.scrollTo(0, 0);
+// vCard-linjer må max være 75 tegn; fortsættelseslinjer starter med mellemrum
+function fold_(line) {
+  const out = [line.slice(0, 75)];
+  for (let i = 75; i < line.length; i += 74) out.push(' ' + line.slice(i, i + 74));
+  return out.join('\r\n');
 }
-
-$('#userRows').addEventListener('click', e => {
-  const b = e.target.closest('button[data-a]'); if (!b) return;
-  const u = b.closest('tr').dataset.u, a = b.dataset.a;
-  if (a === 'edit') { tab('edit'); loadCard(u); return; }
-  if (a === 'delete' && !confirm(`Slet ${u} og brugerens kort? Links og NFC-tags til kortet holder op med at virke.`)) return;
-  if (a === 'reset' && !confirm(`Nulstil adgangskoden for ${u}?`)) return;
-  if (a === 'stats' && !confirm(`Nulstil visninger og gemt-tal for ${u}?`)) return;
-  busy(b, async () => {
-    try {
-      if (a === 'reset') showPw(await call('resetPassword', { username: u }), 'Koden er nulstillet.');
-      if (a === 'stats') await call('resetStats', { username: u });
-      if (a === 'role') await call('updateUser', { username: u, role: b.dataset.v });
-      if (a === 'active') await call('updateUser', { username: u, active: b.dataset.v === '1' });
-      if (a === 'delete') await call('deleteUser', { username: u });
-      loadUsers();
-    } catch (err) { msg('#mUsers', err.message); }
-  });
-});
-
-$('#fNew').addEventListener('submit', e => {
-  e.preventDefault();
-  const f = e.target;
-  msg('#mNew', '');
-  busy(f.querySelector('button.go'), async () => {
-    try {
-      const r = await call('createUser', { username: $('#n_user').value, name: $('#n_name').value, role: $('#n_role').value });
-      showPw(r, 'Brugeren er oprettet.');
-      f.reset();
-      loadUsers();
-    } catch (err) { msg('#mNew', err.message); }
-  });
-});
-
-/* ---------- start ---------- */
-(async function start(){
-  const q = new URLSearchParams(location.search);
-  const slug = (q.get('c') || '').trim().toLowerCase();
-  if (!apiReady()) {
-    show('vMissing');
-    $('#missingTitle').textContent = 'Siden er ikke sat op';
-    $('#missingText').textContent = 'Indsæt Apps Script-adressen i API_URL i index.html.';
-    return;
-  }
-  if (slug) { await startPublic(slug); return; }
-  TOKEN = ls.get('token');
-  if (!TOKEN) { show('vLogin'); return; }
-  try { ME = await call('me'); afterLogin(); }
-  catch (e) { show('vLogin'); msg('#mLogin', e.message); }
-})();
-</script>
-</body>
-</html>
