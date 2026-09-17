@@ -211,6 +211,18 @@ async function shareCard(c, lang){
 }
 
 
+function jsonp(url){
+  return new Promise((resolve, reject) => {
+    const name = 'vkcb' + Date.now() + Math.floor(Math.random() * 1000);
+    const el = document.createElement('script');
+    const done = () => { delete window[name]; el.remove(); clearTimeout(timer); };
+    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 15000);
+    window[name] = data => { done(); resolve(data); };
+    el.onerror = () => { done(); reject(new Error('load failed')); };
+    el.src = url + (url.indexOf('?') < 0 ? '?' : '&') + 'callback=' + name;
+    document.head.appendChild(el);
+  });
+}
 function view(id){ ['vLoading','vPublic','vMissing'].forEach(v => $('#' + v).hidden = v !== id); }
 
 function render(c, offline){
@@ -237,13 +249,17 @@ function render(c, offline){
   const saved = cache.get(slug);
   if (saved) { try { render(JSON.parse(saved), false); } catch(e){} }
   let res, j, detail = '';
+  // 1) Almindelig hentning
   try {
     res = await fetch(API + '?c=' + encodeURIComponent(slug));
-  } catch (e) { detail = 'network: ' + e.message; }
-  if (res) {
-    const txt = await res.text().catch(() => '');
+    const txt = await res.text();
     try { j = JSON.parse(txt); }
     catch (e) { detail = 'HTTP ' + res.status + ': ' + txt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120); }
+  } catch (e) { detail = 'fetch: ' + e.message; }
+  // 2) Reserve-metode som Safari ikke blokerer
+  if (!j) {
+    try { j = await jsonp(API + '?c=' + encodeURIComponent(slug)); res = res || true; }
+    catch (e) { detail += ' | jsonp: ' + e.message; }
   }
   if (j && j.ok) { cache.set(slug, JSON.stringify(j.data)); render(j.data, false); return; }
   if (j && !j.ok) { cache.set(slug, null); view('vMissing'); return; }
