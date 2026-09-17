@@ -1,13 +1,22 @@
 {
+  "id": "./",
   "name": "Visitkort",
   "short_name": "Visitkort",
-  "start_url": "./",
+  "description": "Dit digitale visitkort med QR-kode",
+  "start_url": "./?app=1",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#11140f",
   "theme_color": "#11140f",
+  "lang": "da",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Vis mit kort", "short_name": "Vis kort", "url": "./?show=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Redigér kort", "short_name": "Redigér", "url": "./?edit=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
   ]
 }
