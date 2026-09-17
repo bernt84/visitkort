@@ -1,12 +1,12 @@
 /* Visitkort – service worker (offline + installation)
    Ret VERSION, når du uploader nye filer, så telefonerne henter dem. */
-const VERSION = 'visitkort-v5';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-512-maskable.png', './apple-touch-icon.png',
-               './qrcode.min.js'];
+const VERSION = 'visitkort-v7';
+const SHELL = ['./', './index.html', './card.html', './manifest.webmanifest', './qrcode.min.js',
+               './icon-192.png', './icon-512.png', './icon-512-maskable.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION)
-    .then(c => Promise.all(SHELL.map(u => c.add(new Request(u, { mode: 'same-origin' })).catch(() => {}))))
+    .then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {}))))
     .then(() => self.skipWaiting()));
 });
 
@@ -23,12 +23,13 @@ self.addEventListener('fetch', e => {
   // Data fra Google hentes altid live
   if (/(^|\.)google\.com$|googleusercontent\.com$/.test(url.hostname)) return;
 
-  // Siden selv: hent ny version, brug gemt version uden net
+  // Sider: hent ny version, brug gemt version uden net. Hver side gemmes for sig.
   if (req.mode === 'navigate') {
+    const key = new URL(url.pathname, url.origin).href;
     e.respondWith(fetch(req).then(r => {
-      if (r.ok) { const cp = r.clone(); caches.open(VERSION).then(c => c.put('./index.html', cp)); }
+      if (r.ok) { const cp = r.clone(); caches.open(VERSION).then(c => c.put(key, cp)); }
       return r;
-    }).catch(() => caches.match('./index.html')));
+    }).catch(() => caches.match(key).then(hit => hit || caches.match('./index.html'))));
     return;
   }
 

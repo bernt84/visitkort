@@ -2,11 +2,13 @@
 <html lang="da">
 <head>
 <meta charset="utf-8">
+<script>
+  // Gamle links og NFC-tags (index.html?c=...) sendes straks til det offentlige kort
+  if (/[?&]c=/.test(location.search)) location.replace('card.html' + location.search);
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Business card</title>
-<meta name="description" content="Digital business card">
-<meta property="og:title" content="Digital business card">
-<meta property="og:description" content="Open the card and save the contact to your phone.">
+<title>Visitkort</title>
+<meta name="robots" content="noindex">
 <meta name="theme-color" content="#11140f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -166,13 +168,16 @@ body.showing{padding:0}
 <!-- MIT KORT I FULD SKÆRM (som Wallet) -->
 <div id="vShow" data-view class="themed showview" hidden>
   <div class="show">
-    <div class="showtabs" id="showTabs" role="tablist" aria-label="Profiler"></div>
+    <div id="showPick">
+      <p class="showhint" style="margin-bottom:8px">Vælg den profil, du vil vise</p>
+      <div class="showtabs" id="showTabs" role="tablist" aria-label="Profiler"></div>
+    </div>
     <div id="showCard"></div>
     <div class="showqr" id="showQr"></div>
     <p class="showhint" id="showHint"></p>
     <div class="showbar">
       <button type="button" id="showShare">Del link</button>
-      <button type="button" id="showEdit">Redigér</button>
+      <button type="button" id="showEdit">Editor</button>
     </div>
   </div>
 </div>
@@ -193,6 +198,8 @@ body.showing{padding:0}
     <div class="msg" id="mLogin"></div>
     <p class="muted" style="margin-top:14px">Glemt koden? Kontakt administratoren, så får du en ny.</p>
   </form>
+  <div class="row" style="justify-content:center"><button type="button" class="bInstall" hidden>Installér appen</button></div>
+  <div class="notice installHelp" hidden style="margin-top:14px"></div>
 </div>
 
 <!-- SKIFT KODE -->
@@ -221,11 +228,13 @@ body.showing{padding:0}
   <header class="noprint">
     <div><div class="who" id="who"></div><div class="muted mono" id="whoSub"></div></div>
     <div class="acts">
-      <button class="sm go" id="bShow">Vis mit kort</button>
+      <button class="sm go" id="bShow">Præsentation</button>
+      <button class="sm bInstall" hidden>Installér appen</button>
       <button class="sm" id="bPw">Skift adgangskode</button>
       <button class="sm" id="bOut">Log ud</button>
     </div>
   </header>
+  <div class="notice installHelp noprint" hidden></div>
   <nav class="noprint" id="tabs">
     <button class="sm" data-tab="edit" aria-pressed="true">Mine profiler</button>
     <button class="sm" data-tab="users" id="tabUsers" hidden>Brugere</button>
@@ -407,7 +416,10 @@ const T = {
         offline:'Viser gemt version – ingen forbindelse lige nu.', copied:'Linket er kopieret.', copy:'Kopiér linket:' }
 };
 let TOKEN = null, ME = null, EDIT = null, PHOTO = '', LAST_PW = '';
-let OWNER = null, CARDS = [], DIRTY = false;
+let OWNER = null, CARDS = [], DIRTY = false, GO_SHOW = false;
+// Andre ser kun card.html – aldrig appen
+const cardUrl = slug => new URL('card.html?c=' + encodeURIComponent(slug), location.href.split(/[?#]/)[0]).href;
+const withUrl = c => { if (c && c.slug) c.publicUrl = cardUrl(c.slug); return c; };
 
 /* ---------- lagring (egen nøgle, da alle bernt84.github.io-sider deler lager) ---------- */
 const ls = {
@@ -609,7 +621,9 @@ function afterLogin(){
   $('#tabUsers').hidden = ME.role !== 'admin';
   show('vApp');
   tab('edit');
-  loadOwner(ME.username);
+  loadOwner(ME.username).then(() => {
+    if (GO_SHOW && getMyCards().length) { GO_SHOW = false; showMine(); }
+  });
 }
 
 function logoutLocal(reason){
@@ -786,7 +800,7 @@ async function loadOwner(owner, slug){
   $('#fNewCard').hidden = true;
   msg('#mCard', 'Henter…', true);
   try {
-    CARDS = await call('listCards', { owner });
+    CARDS = (await call('listCards', { owner })).map(withUrl);
     if (isOwn()) cacheMyCards(CARDS);
     const pick = CARDS.find(c => c.slug === slug) || CARDS[0];
     if (pick) fillCard(pick);
@@ -815,7 +829,7 @@ $('#cardTabs').addEventListener('click', e => {
 });
 
 function fillCard(c){
-  EDIT = c;
+  EDIT = withUrl(c);
   const i = CARDS.findIndex(x => x.slug === c.slug);
   if (i >= 0) CARDS[i] = c; else CARDS.push(c);
   if (isOwn()) cacheMyCards(CARDS);
@@ -996,7 +1010,7 @@ $('#fNew').addEventListener('submit', e => {
 /* ---------- mit kort i fuld skærm ---------- */
 function cacheMyCards(list){ ls.set('mine', JSON.stringify(list || [])); }
 function getMyCards(){
-  try { const v = JSON.parse(ls.get('mine') || 'null'); return Array.isArray(v) ? v : (v ? [v] : []); }
+  try { const v = JSON.parse(ls.get('mine') || 'null'); return (Array.isArray(v) ? v : (v ? [v] : [])).map(withUrl); }
   catch(e){ return []; }
 }
 
@@ -1020,7 +1034,7 @@ function showMine(slug){
   applyTheme($('#vShow'), t);
   document.body.classList.add('showing');
   document.querySelector('meta[name=theme-color]').content = t.bg;
-  $('#showTabs').hidden = list.length < 2;
+  $('#showPick').hidden = list.length < 2;
   $('#showTabs').innerHTML = list.map(x => `<button type="button" role="tab" data-slug="${esc(x.slug)}" aria-selected="${x.slug === c.slug}">${esc(x.label || 'Profil')}</button>`).join('');
   $('#showCard').innerHTML = cardHtml(c, t);
   drawQr($('#showQr'), c.hidden ? '' : c.publicUrl);
@@ -1081,6 +1095,38 @@ $('#bNfc').addEventListener('click', async () => {
   } catch (e) { msg('#mCard', 'NFC fejlede: ' + e.message); }
 });
 
+/* ---------- installér appen ---------- */
+let installEvt = null;
+const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function updateInstall(){
+  const can = !isInstalled() && (installEvt || isIOS());
+  document.querySelectorAll('.bInstall').forEach(b => b.hidden = !can);
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; updateInstall(); });
+window.addEventListener('appinstalled', () => { installEvt = null; updateInstall(); });
+document.addEventListener('click', async e => {
+  if (!e.target.closest('.bInstall')) return;
+  if (installEvt) {
+    installEvt.prompt();
+    try { await installEvt.userChoice; } catch(_){}
+    installEvt = null; updateInstall();
+    return;
+  }
+  const help = isIOS()
+    ? `<b>Sådan installerer du på iPhone</b><br>
+       1. Åbn siden i <b>Safari</b>.<br>
+       2. Tryk på <b>Del</b>-knappen (firkanten med pil op) nederst på skærmen.<br>
+       3. Rul ned og tryk <b>Føj til hjemmeskærm</b>.<br>
+       4. Tryk <b>Tilføj</b>. Appen ligger nu på hjemmeskærmen og åbner på præsentationen.`
+    : `<b>Sådan installerer du</b><br>Åbn menuen (⋮) i Chrome og vælg <b>Installér app</b> eller <b>Føj til startskærm</b>.`;
+  document.querySelectorAll('.installHelp').forEach(h => {
+    h.hidden = !h.hidden;
+    h.innerHTML = help;
+  });
+});
+updateInstall();
+
 /* ---------- offline / installation ---------- */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
@@ -1096,9 +1142,12 @@ if ('serviceWorker' in navigator) {
     $('#missingText').textContent = 'Indsæt Apps Script-adressen i API_URL i index.html.';
     return;
   }
-  if (slug) { await startPublic(slug); return; }
+  if (slug) { location.replace(cardUrl(slug)); return; }   // gamle links og NFC-tags
   const installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  if ((q.has('show') || (installed && !q.has('edit'))) && showMine()) { refreshMine(); return; }
+  if (q.has('show') || (installed && !q.has('edit'))) {
+    if (showMine()) { refreshMine(); return; }
+    GO_SHOW = true;   // ingen gemte profiler endnu: log ind, hent dem, og vis præsentationen
+  }
   await openApp();
 })();
 </script>
