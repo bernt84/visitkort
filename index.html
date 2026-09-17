@@ -120,6 +120,14 @@ body.public{padding:0}
 body.public #vPublic{max-width:none;min-height:100vh;display:flex;justify-content:center;background:var(--bg)}
 body.public #vPublic .stage{width:100%;max-width:440px;padding:calc(22px + env(safe-area-inset-top)) 14px 40px}
 
+.cardtabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.cardtabs button{padding:9px 14px}
+.cardtabs button[aria-selected=true]{background:var(--lime);border-color:var(--lime);color:#11140f}
+.cardtabs .tabhint{color:var(--muted);font-size:.85rem;margin-right:4px}
+.cardtabs .eye{opacity:.6;font-weight:400;margin-left:4px}
+.showtabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.showtabs button{font:inherit;font-weight:600;font-size:.9rem;padding:8px 14px;border-radius:999px;border:1px solid var(--ln);background:var(--card);color:var(--tx);cursor:pointer}
+.showtabs button[aria-selected=true]{background:var(--acc);border-color:var(--acc);color:var(--on)}
 .showview{position:fixed;inset:0;overflow:auto;background:var(--bg);z-index:5}
 .show{max-width:460px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;gap:14px;
   padding:calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom))}
@@ -158,6 +166,7 @@ body.showing{padding:0}
 <!-- MIT KORT I FULD SKÆRM (som Wallet) -->
 <div id="vShow" data-view class="themed showview" hidden>
   <div class="show">
+    <div class="showtabs" id="showTabs" role="tablist" aria-label="Profiler"></div>
     <div id="showCard"></div>
     <div class="showqr" id="showQr"></div>
     <p class="showhint" id="showHint"></p>
@@ -218,15 +227,34 @@ body.showing{padding:0}
     </div>
   </header>
   <nav class="noprint" id="tabs">
-    <button class="sm" data-tab="edit" aria-pressed="true">Mit kort</button>
+    <button class="sm" data-tab="edit" aria-pressed="true">Mine profiler</button>
     <button class="sm" data-tab="users" id="tabUsers" hidden>Brugere</button>
   </nav>
 
   <section id="tEdit">
     <div class="notice" id="editingOther" hidden></div>
+    <div class="cardtabs noprint" id="cardTabs" role="tablist" aria-label="Profiler"></div>
+    <form id="fNewCard" class="noprint" hidden style="margin-bottom:16px">
+      <h2>Ny profil</h2>
+      <div class="grid2">
+        <div><label for="nc_label">Navn på fanen</label><input id="nc_label" maxlength="30" placeholder="fx Privat" required></div>
+        <div><label for="nc_slug">Link-navn (valgfrit)</label><input id="nc_slug" placeholder="laves automatisk" autocapitalize="none" autocorrect="off" pattern="[a-zA-Z0-9\-]{2,40}"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="nc_copy" checked> <span>Kopiér oplysninger, billede og tema fra <b id="nc_from"></b></span></label>
+      <div class="row">
+        <button class="go" type="submit">Opret profil</button>
+        <button type="button" id="nc_cancel">Annullér</button>
+      </div>
+      <div class="msg" id="mNewCard"></div>
+    </form>
     <div class="editor">
       <form id="fCard" class="noprint">
-        <h2>Profilbillede</h2>
+        <h2>Profil</h2>
+        <label for="c_label" style="margin-top:0">Navn på fanen</label>
+        <input id="c_label" maxlength="30" placeholder="fx Arbejde">
+        <p class="muted" style="margin-top:6px">Kun du kan se fanens navn. Hver profil har sit eget link og sin egen QR-kode.</p>
+
+        <h3>Profilbillede</h3>
         <div class="photoedit">
           <img class="thumb" id="photoThumb" alt="" hidden>
           <div class="acts">
@@ -287,12 +315,13 @@ body.showing{padding:0}
         <p class="muted" style="margin-top:6px">Sproget gælder knapperne på kortet. Titel og tekst skriver du selv på det sprog, du ønsker.</p>
 
         <h3>Synlighed</h3>
-        <label class="check"><input type="checkbox" id="c_hidden"> Skjul kortet for andre</label>
-        <p class="muted" style="margin-top:6px">Når kortet er skjult, viser linket og NFC-tagget "Card not found".</p>
+        <label class="check"><input type="checkbox" id="c_hidden"> Skjul profilen for andre</label>
+        <p class="muted" style="margin-top:6px">Når profilen er skjult, viser dens link og NFC-tag "Card not found".</p>
 
         <div class="row">
-          <button class="go" type="submit">Gem kort</button>
-          <button type="button" id="bBackMine" hidden>Tilbage til mit kort</button>
+          <button class="go" type="submit">Gem profil</button>
+          <button type="button" class="danger" id="bDelCard" hidden>Slet profil</button>
+          <button type="button" id="bBackMine" hidden>Tilbage til mine profiler</button>
         </div>
         <div class="msg" id="mCard"></div>
       </form>
@@ -378,6 +407,7 @@ const T = {
         offline:'Viser gemt version – ingen forbindelse lige nu.', copied:'Linket er kopieret.', copy:'Kopiér linket:' }
 };
 let TOKEN = null, ME = null, EDIT = null, PHOTO = '', LAST_PW = '';
+let OWNER = null, CARDS = [], DIRTY = false;
 
 /* ---------- lagring (egen nøgle, da alle bernt84.github.io-sider deler lager) ---------- */
 const ls = {
@@ -579,7 +609,7 @@ function afterLogin(){
   $('#tabUsers').hidden = ME.role !== 'admin';
   show('vApp');
   tab('edit');
-  loadCard(ME.username);
+  loadOwner(ME.username);
 }
 
 function logoutLocal(reason){
@@ -587,7 +617,7 @@ function logoutLocal(reason){
   show('vLogin');
   if (reason) msg('#mLogin', reason);
 }
-$('#bOut').addEventListener('click', async () => { try { await call('logout'); } catch(e){} ls.set('mine', null); logoutLocal(); });
+$('#bOut').addEventListener('click', async () => { try { await call('logout'); } catch(e){} ls.set('mine', null); ls.set('mineCurrent', null); DIRTY = false; logoutLocal(); });
 
 /* ---------- adgangskode ---------- */
 function openPw(forced){
@@ -633,6 +663,7 @@ $('#presets').addEventListener('click', e => {
   const p = PRESETS[b.dataset.p];
   $('#t_bg').value = p.bg; $('#t_card').value = p.card; $('#t_text').value = p.text; $('#t_accent').value = p.accent;
   markPreset(b.dataset.p);
+  DIRTY = true;
   preview();
 });
 function markPreset(key){ document.querySelectorAll('#presets button').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === key)); }
@@ -653,7 +684,7 @@ function addLinkRow(l){
   d.innerHTML = `<input placeholder="Navn, fx Instagram" maxlength="40" aria-label="Linkets navn" value="${esc(l && l.label)}">
     <input placeholder="instagram.com/dit-navn" autocapitalize="none" autocorrect="off" aria-label="Adresse" value="${esc(l && l.url)}">
     <button type="button" class="sm" aria-label="Fjern link">Fjern</button>`;
-  d.querySelector('button').onclick = () => { d.remove(); updateLinkBtn(); preview(); };
+  d.querySelector('button').onclick = () => { d.remove(); DIRTY = true; updateLinkBtn(); preview(); };
   $('#linkRows').appendChild(d);
   updateLinkBtn();
 }
@@ -712,15 +743,17 @@ $('#photoIn').addEventListener('change', async e => {
   e.target.value = '';
   if (!f) return;
   msg('#mCard', 'Behandler billede…', true);
-  try { setPhoto(await makePhoto(f)); msg('#mCard', 'Billedet er klar. Tryk "Gem kort".', true); }
+  try { setPhoto(await makePhoto(f)); DIRTY = true; msg('#mCard', 'Billedet er klar. Tryk "Gem profil".', true); }
   catch (err) { msg('#mCard', err.message); }
 });
-$('#photoDel').addEventListener('click', () => { setPhoto(''); msg('#mCard', 'Billedet fjernes, når du trykker "Gem kort".', true); });
+$('#photoDel').addEventListener('click', () => { setPhoto(''); DIRTY = true; msg('#mCard', 'Billedet fjernes, når du trykker "Gem profil".', true); });
+window.addEventListener('beforeunload', e => { if (DIRTY) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- redigér kort ---------- */
 function formData(){
   const d = {};
   TEXT.forEach(k => d[k] = $('#c_' + k).value);
+  d.label = $('#c_label').value;
   d.photo = PHOTO;
   d.theme = JSON.stringify(readTheme());
   d.links = readLinks();
@@ -740,18 +773,54 @@ function preview(){
   $('#prevLinks').querySelectorAll('a,button').forEach(a => a.addEventListener('click', ev => ev.preventDefault()));
 }
 $('#fCard').addEventListener('input', e => {
+  DIRTY = true;
   if (['t_bg','t_card','t_text','t_accent'].indexOf(e.target.id) >= 0) markPreset(readTheme().preset);
   preview();
 });
 
-async function loadCard(slug){
+/* ---------- profiler (faner) ---------- */
+const isOwn = () => ME && OWNER === ME.username;
+
+async function loadOwner(owner, slug){
+  OWNER = owner;
+  $('#fNewCard').hidden = true;
   msg('#mCard', 'Henter…', true);
-  try { fillCard(await call('getCard', { slug })); msg('#mCard', ''); }
-  catch (err) { msg('#mCard', err.message); }
+  try {
+    CARDS = await call('listCards', { owner });
+    if (isOwn()) cacheMyCards(CARDS);
+    const pick = CARDS.find(c => c.slug === slug) || CARDS[0];
+    if (pick) fillCard(pick);
+    msg('#mCard', '');
+  } catch (err) { msg('#mCard', err.message); }
 }
+
+function renderTabs(){
+  const active = EDIT && EDIT.slug;
+  $('#cardTabs').innerHTML =
+    CARDS.map(c => `<button type="button" class="sm" role="tab" data-slug="${esc(c.slug)}" aria-selected="${c.slug === active}">${esc(c.label || 'Profil')}${c.hidden ? '<span class="eye">(skjult)</span>' : ''}</button>`).join('') +
+    (CARDS.length < 10 ? `<button type="button" class="sm" id="bNewCard">+ Ny profil</button>` : '');
+}
+
+function confirmLeave(){
+  return !DIRTY || confirm('Du har ændringer, der ikke er gemt. Fortsæt alligevel?');
+}
+
+$('#cardTabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'bNewCard') { openNewCard(); return; }
+  if (EDIT && b.dataset.slug === EDIT.slug) return;
+  if (!confirmLeave()) return;
+  const c = CARDS.find(x => x.slug === b.dataset.slug);
+  if (c) { $('#fNewCard').hidden = true; fillCard(c); msg('#mCard', ''); }
+});
+
 function fillCard(c){
   EDIT = c;
-  if (ME && c.slug === ME.username) cacheMine(c);
+  const i = CARDS.findIndex(x => x.slug === c.slug);
+  if (i >= 0) CARDS[i] = c; else CARDS.push(c);
+  if (isOwn()) cacheMyCards(CARDS);
+
+  $('#c_label').value = c.label || '';
   TEXT.forEach(k => $('#c_' + k).value = c[k] || '');
   const t = resolveTheme(c);
   $('#t_bg').value = t.bg; $('#t_card').value = t.card; $('#t_text').value = t.text; $('#t_accent').value = t.accent;
@@ -761,18 +830,24 @@ function fillCard(c){
   $('#linkRows').innerHTML = '';
   parseLinks(c.links).forEach(addLinkRow);
   updateLinkBtn();
-  const other = ME && c.slug !== ME.username;
+
+  const other = ME && !isOwn();
   $('#editingOther').hidden = !other;
-  $('#editingOther').innerHTML = other ? `Du redigerer kortet for <b>${esc(fullName(c) || c.slug)}</b>.` : '';
+  $('#editingOther').innerHTML = other ? `Du redigerer profilerne for <b>${esc(OWNER)}</b>.` : '';
   $('#bBackMine').hidden = !other;
+  $('#bDelCard').hidden = CARDS.length <= 1;
+
   $('#shareUrl').value = c.publicUrl;
   $('#bOpen').href = c.publicUrl;
   $('#stViews').textContent = c.views || 0;
   $('#stSaves').textContent = c.saves || 0;
   drawQr($('#prevQr'), c.publicUrl);
   setPhoto(c.photo);
+  renderTabs();
+  DIRTY = false;
 }
-$('#bBackMine').addEventListener('click', () => loadCard(ME.username));
+
+$('#bBackMine').addEventListener('click', () => { if (confirmLeave()) loadOwner(ME.username); });
 
 $('#fCard').addEventListener('submit', e => {
   e.preventDefault();
@@ -782,8 +857,51 @@ $('#fCard').addEventListener('submit', e => {
       const c = await call('saveCard', { slug: EDIT.slug, data: formData() });
       fillCard(c);
       ls.set('card:' + c.slug, null);
-      msg('#mCard', c.hidden ? 'Kortet er gemt. Det er skjult for andre.' : 'Kortet er gemt.', true);
+      msg('#mCard', c.hidden ? 'Profilen er gemt. Den er skjult for andre.' : 'Profilen er gemt.', true);
     } catch (err) { msg('#mCard', err.message); }
+  });
+});
+
+$('#bDelCard').addEventListener('click', () => {
+  if (!EDIT || CARDS.length <= 1) return;
+  if (!confirm(`Slet profilen "${EDIT.label}"?\n\nLinket, QR-koden og NFC-tags til denne profil holder op med at virke.`)) return;
+  busy($('#bDelCard'), async () => {
+    try {
+      const gone = EDIT.slug;
+      await call('deleteCard', { slug: gone });
+      CARDS = CARDS.filter(c => c.slug !== gone);
+      if (isOwn()) { cacheMyCards(CARDS); if (ls.get('mineCurrent') === gone) ls.set('mineCurrent', null); }
+      ls.set('card:' + gone, null);
+      fillCard(CARDS[0]);
+      msg('#mCard', 'Profilen er slettet.', true);
+    } catch (err) { msg('#mCard', err.message); }
+  });
+});
+
+function openNewCard(){
+  $('#fNewCard').hidden = false;
+  $('#nc_from').textContent = EDIT ? (EDIT.label || 'Profil') : '';
+  $('#nc_label').value = '';
+  $('#nc_slug').value = '';
+  $('#nc_copy').checked = true;
+  msg('#mNewCard', '');
+  $('#nc_label').focus();
+}
+$('#nc_cancel').addEventListener('click', () => { $('#fNewCard').hidden = true; });
+$('#fNewCard').addEventListener('submit', e => {
+  e.preventDefault();
+  if ($('#nc_copy').checked && DIRTY && !confirm('Ændringer, der ikke er gemt, kommer ikke med i kopien. Fortsæt?')) return;
+  busy(e.target.querySelector('button.go'), async () => {
+    try {
+      const c = await call('createCard', {
+        owner: OWNER, label: $('#nc_label').value, slug: $('#nc_slug').value,
+        copyFrom: $('#nc_copy').checked && EDIT ? EDIT.slug : ''
+      });
+      $('#fNewCard').hidden = true;
+      fillCard(c);
+      msg('#mCard', 'Profilen er oprettet. Ret oplysningerne og tryk "Gem profil".', true);
+      window.scrollTo(0, 0);
+    } catch (err) { msg('#mNewCard', err.message); }
   });
 });
 
@@ -813,10 +931,9 @@ async function loadUsers(){
       return `<tr data-u="${esc(u.username)}">
         <td><b>${esc(u.name || u.username)}</b><div class="muted mono">${esc(u.username)}</div>${u.title ? `<div class="muted">${esc(u.title)}</div>` : ''}</td>
         <td>${u.role === 'admin' ? '<span class="tag admin">admin</span>' : '<span class="tag">bruger</span>'}${u.active ? '' : '<span class="tag off">deaktiveret</span>'}${u.hidden ? '<span class="tag off">kort skjult</span>' : ''}${u.mustChange ? '<span class="tag">mangler egen kode</span>' : ''}${u.hasPhoto ? '' : '<span class="tag">intet billede</span>'}</td>
-        <td class="muted">${u.views} visninger · ${u.saves} gemt<br>Login: ${last}</td>
+        <td class="muted">${u.cards} ${u.cards === 1 ? 'profil' : 'profiler'}: ${esc((u.labels || []).join(', '))}<br>${u.views} visninger · ${u.saves} gemt<br>Login: ${last}</td>
         <td><div class="acts">
-          <button class="sm" data-a="edit">Redigér kort</button>
-          <a class="fbtn sm" href="${esc(u.publicUrl)}" target="_blank" rel="noopener">Åbn</a>
+          <button class="sm" data-a="edit">Redigér profiler</button>
           <button class="sm" data-a="reset">Nulstil kode</button>
           <button class="sm" data-a="stats">Nulstil tal</button>
           ${self ? '' : `<button class="sm" data-a="role" data-v="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Fjern admin' : 'Gør til admin'}</button>
@@ -846,7 +963,7 @@ function showPw(r, what){
 $('#userRows').addEventListener('click', e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const u = b.closest('tr').dataset.u, a = b.dataset.a;
-  if (a === 'edit') { tab('edit'); loadCard(u); return; }
+  if (a === 'edit') { if (!confirmLeave()) return; tab('edit'); loadOwner(u); return; }
   if (a === 'delete' && !confirm(`Slet ${u} og brugerens kort? Links og NFC-tags til kortet holder op med at virke.`)) return;
   if (a === 'reset' && !confirm(`Nulstil adgangskoden for ${u}?`)) return;
   if (a === 'stats' && !confirm(`Nulstil visninger og gemt-tal for ${u}?`)) return;
@@ -877,8 +994,11 @@ $('#fNew').addEventListener('submit', e => {
 });
 
 /* ---------- mit kort i fuld skærm ---------- */
-function cacheMine(c){ ls.set('mine', JSON.stringify(c)); }
-function getMine(){ try { return JSON.parse(ls.get('mine') || 'null'); } catch(e){ return null; } }
+function cacheMyCards(list){ ls.set('mine', JSON.stringify(list || [])); }
+function getMyCards(){
+  try { const v = JSON.parse(ls.get('mine') || 'null'); return Array.isArray(v) ? v : (v ? [v] : []); }
+  catch(e){ return []; }
+}
 
 let wakeLock = null;
 async function keepAwake(on){
@@ -891,40 +1011,54 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !$('#vShow').hidden) keepAwake(true);
 });
 
-function showMine(c){
-  c = c || getMine();
-  if (!c) return false;
+function showMine(slug){
+  const list = getMyCards();
+  if (!list.length) return false;
+  const c = list.find(x => x.slug === slug) || list.find(x => x.slug === ls.get('mineCurrent')) || list[0];
+  ls.set('mineCurrent', c.slug);
   const t = resolveTheme(c);
   applyTheme($('#vShow'), t);
   document.body.classList.add('showing');
   document.querySelector('meta[name=theme-color]').content = t.bg;
+  $('#showTabs').hidden = list.length < 2;
+  $('#showTabs').innerHTML = list.map(x => `<button type="button" role="tab" data-slug="${esc(x.slug)}" aria-selected="${x.slug === c.slug}">${esc(x.label || 'Profil')}</button>`).join('');
   $('#showCard').innerHTML = cardHtml(c, t);
-  drawQr($('#showQr'), c.publicUrl);
-  $('#showHint').textContent = T[t.lang].scanSave;
+  drawQr($('#showQr'), c.hidden ? '' : c.publicUrl);
+  $('#showHint').textContent = c.hidden ? 'Profilen er skjult – QR-koden virker ikke.' : T[t.lang].scanSave;
   show('vShow');
   keepAwake(true);
   return true;
 }
+$('#showTabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-slug]');
+  if (b) showMine(b.dataset.slug);
+});
 function closeShow(){
   keepAwake(false);
   document.body.classList.remove('showing');
   document.querySelector('meta[name=theme-color]').content = '#11140f';
 }
 async function refreshMine(){
-  const c = getMine();
-  if (!c) return;
-  try {
-    const j = await getPublic(c.slug, false);
-    if (j.ok) {
-      const n = Object.assign({}, c, j.data);
-      cacheMine(n);
-      if (!$('#vShow').hidden) showMine(n);
-    }
-  } catch(e){}
+  const list = getMyCards();
+  if (!list.length) return;
+  const out = await Promise.all(list.map(async c => {
+    if (c.hidden) return c;
+    try { const j = await getPublic(c.slug, false); return j.ok ? Object.assign({}, c, j.data) : c; }
+    catch(e){ return c; }
+  }));
+  cacheMyCards(out);
+  if (!$('#vShow').hidden) showMine(ls.get('mineCurrent'));
 }
-$('#bShow').addEventListener('click', () => { if (!showMine(EDIT && ME && EDIT.slug === ME.username ? EDIT : null)) msg('#mCard', 'Gem dit kort først.'); });
+$('#bShow').addEventListener('click', () => {
+  if (DIRTY && !confirm('Du har ændringer, der ikke er gemt. Vis kortet alligevel?')) return;
+  if (!showMine(isOwn() && EDIT ? EDIT.slug : null)) msg('#mCard', 'Gem din profil først.');
+});
 $('#showEdit').addEventListener('click', () => { closeShow(); openApp(); });
-$('#showShare').addEventListener('click', () => { const c = getMine(); if (c) shareCard(c, 'da'); });
+$('#showShare').addEventListener('click', () => {
+  const list = getMyCards();
+  const c = list.find(x => x.slug === ls.get('mineCurrent')) || list[0];
+  if (c) shareCard(c, 'da');
+});
 
 async function openApp(){
   TOKEN = ls.get('token');
