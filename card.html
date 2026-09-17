@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Business card</title>
+<meta name="description" content="Digital business card">
+<meta property="og:title" content="Digital business card">
+<meta property="og:description" content="Open the card and save the contact to your phone.">
+<meta name="theme-color" content="#11140f">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="qrcode.min.js"></script>
+<script>
+  /* Offentlig side: det er denne side, andre ser, når de scanner din QR-kode.
+     Den har intet login og ingen editor. Samme adresse som i index.html: */
+  window.API_URL = "https://script.google.com/macros/s/AKfycbwOQC_TmmLTr4B0kn51kiDF3eElpHx2pRSZ3LN65EGtPL478SoItdAHqkhl6U04h2m9/exec";
+</script>
+<style>
+*{box-sizing:border-box;margin:0}
+html,body{background:#11140f;font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif}
+body{min-height:100vh}
+[hidden]{display:none!important}
+.msgpage{max-width:440px;margin:0 auto;padding:60px 20px;color:#e6eae1;text-align:center;line-height:1.5}
+.msgpage h1{font-size:1.3rem;margin-bottom:8px}
+.msgpage p{color:#98a28f}
+/* ---------- det offentlige kort ---------- */
+.themed{--bg:#11140f;--card:#1a1f18;--tx:#e6eae1;--mu:rgba(230,234,225,.68);--ln:rgba(230,234,225,.16);--acc:#b6e04a;--on:#111;--ff:Archivo,system-ui,sans-serif;
+  font-family:var(--ff);color:var(--tx)}
+.stage{background:var(--bg);border-radius:18px;padding:16px}
+.vcard{background:var(--card);border:1px solid var(--ln);border-top:5px solid var(--acc);border-radius:16px;padding:22px 20px;display:flex;gap:16px;align-items:center}
+.vcard.lay-top{flex-direction:column;text-align:center;padding-top:26px}
+.vcard .ph{width:84px;height:84px;object-fit:cover;flex:none;border-radius:50%;border:2px solid var(--acc)}
+.vcard.lay-top .ph{width:116px;height:116px}
+.vcard .ph.square{border-radius:14px}
+.vcard .cb{min-width:0}
+.vcard .co{color:var(--mu);font-weight:600;font-size:.88rem}
+.vcard .nm{font-size:1.75rem;font-weight:700;line-height:1.1;margin:6px 0;overflow-wrap:anywhere}
+.vcard .ti{color:var(--acc);font-weight:600}
+.vcard .nt{color:var(--mu);font-size:.88rem;margin-top:8px;line-height:1.45;white-space:pre-line}
+.vlinks{display:grid;gap:9px;margin-top:12px}
+.vlinks a,.vlinks button{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;border-radius:11px;width:100%;
+  border:1px solid var(--ln);background:var(--card);color:var(--tx);text-decoration:none;font:inherit;font-weight:600;min-width:0;text-align:left}
+.vlinks span{color:var(--mu);font-weight:400;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vlinks .primary{background:var(--acc);border-color:var(--acc);color:var(--on);justify-content:center;font-size:1.05rem;padding:16px}
+.vqr{display:flex;gap:14px;align-items:center;margin-top:12px;padding:14px;border:1px solid var(--ln);border-radius:11px;color:var(--mu);font-size:.88rem;line-height:1.4}
+.qr{background:#fff;padding:8px;border-radius:6px;flex:none;line-height:0}
+.qr img,.qr canvas{width:120px;height:120px}
+.vfoot{text-align:center;margin-top:18px;font-size:.8rem}
+.vfoot a{color:var(--mu)}
+
+body.public{padding:0}
+body.public #vPublic{max-width:none;min-height:100vh;display:flex;justify-content:center;background:var(--bg)}
+body.public #vPublic .stage{width:100%;max-width:440px;padding:calc(22px + env(safe-area-inset-top)) 14px 40px}
+
+
+#vPublic{min-height:100vh;display:flex;justify-content:center;background:var(--bg)}
+#vPublic .stage{width:100%;max-width:440px;padding:calc(22px + env(safe-area-inset-top)) 14px 40px}
+</style>
+</head>
+<body>
+
+<div id="vLoading" class="msgpage">Loading…</div>
+
+<div id="vPublic" class="themed" hidden>
+  <div class="stage">
+    <div id="pubCard"></div>
+    <div class="vlinks" id="pubLinks"></div>
+    <div class="vqr"><div class="qr" id="pubQr"></div><div id="pubScan"></div></div>
+    <div class="vfoot" id="pubOffline" hidden></div>
+  </div>
+</div>
+
+<div id="vMissing" class="msgpage" hidden>
+  <h1 id="missingTitle">Card not found</h1>
+  <p id="missingText">The link is incorrect, or the card is no longer available.</p>
+</div>
+
+<script>
+const API = window.API_URL;
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const FONTS = ['Archivo','Space Grotesk','IBM Plex Sans','Source Serif 4','Barlow Condensed'];
+const PRESETS = {
+  staal: { name:'Stål',        bg:'#11140f', card:'#1a1f18', text:'#e6eae1', accent:'#b6e04a' },
+  hav:   { name:'Hav',         bg:'#0d1b24', card:'#13283a', text:'#e4eef4', accent:'#4cc3d9' },
+  nat:   { name:'Nat og guld', bg:'#0c0c0d', card:'#17171a', text:'#f1ede4', accent:'#d4a64a' },
+  skov:  { name:'Skov',        bg:'#0f1a14', card:'#16261d', text:'#e3ece5', accent:'#7fcf8f' },
+  lys:   { name:'Lys',         bg:'#e9edf0', card:'#ffffff', text:'#1c2329', accent:'#1f6f8b' },
+  signal:{ name:'Signal',      bg:'#f3f4f5', card:'#ffffff', text:'#16181b', accent:'#d7261e' },
+  rosa:  { name:'Rosa',        bg:'#f6eef1', card:'#ffffff', text:'#2a1d24', accent:'#b8467a' }
+};
+const T = {
+  en: { save:'Save contact', call:'Call', sms:'Text message', mail:'Email', web:'Website', addr:'Address',
+        share:'Share card', shareSub:'send the link', scanSave:'Scan to save my contact', link:'Link', scan:'Scan the code to open this card on another phone.',
+        offline:'Showing saved version – no connection right now.', copied:'Link copied.', copy:'Copy the link:' },
+  da: { save:'Gem kontakt', call:'Ring', sms:'Send sms', mail:'Mail', web:'Hjemmeside', addr:'Adresse',
+        share:'Del kortet', shareSub:'send linket videre', scanSave:'Scan for at gemme min kontakt', link:'Link', scan:'Scan koden for at åbne kortet på en anden telefon.',
+        offline:'Viser gemt version – ingen forbindelse lige nu.', copied:'Linket er kopieret.', copy:'Kopiér linket:' }
+};
+
+const cardUrl = slug => new URL('card.html?c=' + encodeURIComponent(slug), location.href.split(/[?#]/)[0]).href;
+const cache = {
+  get(k){ try { return localStorage.getItem('visitkort-card:' + k); } catch(e){ return null; } },
+  set(k, v){ try { v == null ? localStorage.removeItem('visitkort-card:' + k) : localStorage.setItem('visitkort-card:' + k, v); } catch(e){} }
+};
+
+const loadedFonts = { Archivo: true };
+function loadFont(f){
+  if (!f || loadedFonts[f]) return;
+  loadedFonts[f] = true;
+  const l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?family=' + f.replace(/ /g, '+') + ':wght@400;600;700&display=swap';
+  document.head.appendChild(l);
+}
+function rgba(hex, a){ const n = parseInt(hex.slice(1), 16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
+function onColor(hex){
+  const n = parseInt(hex.slice(1), 16);
+  const lin = v => { v /= 255; return v <= .03928 ? v/12.92 : Math.pow((v+.055)/1.055, 2.4); };
+  const L = .2126*lin(n>>16) + .7152*lin((n>>8)&255) + .0722*lin(n&255);
+  return L > .4 ? '#111111' : '#ffffff';
+}
+function resolveTheme(c){
+  let t = {};
+  try { t = JSON.parse((c && c.theme) || '{}'); } catch(e){}
+  const key = PRESETS[t.preset] ? t.preset : 'staal';
+  const p = PRESETS[key];
+  const hex = v => /^#[0-9a-f]{6}$/i.test(v || '') ? v : '';
+  return {
+    preset: t.preset || key,
+    bg: hex(t.bg) || p.bg, card: hex(t.card) || p.card, text: hex(t.text) || p.text,
+    accent: hex(t.accent) || hex(c && c.color) || p.accent,
+    font: FONTS.indexOf(t.font) >= 0 ? t.font : 'Archivo',
+    shape: t.shape === 'square' ? 'square' : 'round',
+    layout: t.layout === 'top' ? 'top' : 'side',
+    lang: t.lang === 'da' ? 'da' : 'en'
+  };
+}
+function applyTheme(el, t){
+  loadFont(t.font);
+  const s = el.style;
+  s.setProperty('--bg', t.bg); s.setProperty('--card', t.card); s.setProperty('--tx', t.text);
+  s.setProperty('--mu', rgba(t.text, .68)); s.setProperty('--ln', rgba(t.text, .16));
+  s.setProperty('--acc', t.accent); s.setProperty('--on', onColor(t.accent));
+  s.setProperty('--ff', `'${t.font}', system-ui, -apple-system, sans-serif`);
+}
+
+/* ---------- kort-visning ---------- */
+function parseLinks(v){ try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+const okUrl = u => /^https?:\/\//i.test(u || '');
+const short = u => String(u).replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+const fullName = c => [c.firstName, c.lastName].filter(Boolean).join(' ');
+
+function cardHtml(c, t){
+  const photo = c.photo ? `<img class="ph ${t.shape}" src="${esc(c.photo)}" alt="">` : '';
+  return `<div class="vcard lay-${t.layout}">${photo}<div class="cb">
+    ${c.company ? `<div class="co">${esc(c.company)}</div>` : ''}
+    <div class="nm">${esc(fullName(c) || 'Dit navn')}</div>
+    ${c.title ? `<div class="ti">${esc(c.title)}</div>` : ''}
+    ${c.note ? `<div class="nt">${esc(c.note)}</div>` : ''}
+  </div></div>`;
+}
+function linksHtml(c, lang){
+  const t = T[lang] || T.en;
+  const L = [];
+  const tel = c.phone ? esc(c.phone.replace(/[^\d+]/g,'')) : '';
+  L.push(`<a class="primary" href="${esc(c.vcfUrl || '#')}">${t.save}</a>`);
+  if (c.phone) L.push(`<a href="tel:${tel}">${t.call} <span>${esc(c.phone)}</span></a>`);
+  if (c.phone) L.push(`<a href="sms:${tel}">${t.sms} <span>${esc(c.phone)}</span></a>`);
+  if (c.email) L.push(`<a href="mailto:${esc(c.email)}">${t.mail} <span>${esc(c.email)}</span></a>`);
+  if (okUrl(c.linkedin)) L.push(`<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn <span>${esc(short(c.linkedin).replace(/^linkedin\.com\/in\//i,''))}</span></a>`);
+  if (okUrl(c.web)) L.push(`<a href="${esc(c.web)}" target="_blank" rel="noopener">${t.web} <span>${esc(short(c.web))}</span></a>`);
+  parseLinks(c.links).forEach(l => { if (okUrl(l.url)) L.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || t.link)} <span>${esc(short(l.url))}</span></a>`); });
+  if (c.address) L.push(`<a href="https://maps.apple.com/?q=${encodeURIComponent(c.address)}" target="_blank" rel="noopener">${t.addr} <span>${esc(c.address)}</span></a>`);
+  L.push(`<button type="button" data-share>${t.share} <span>${t.shareSub}</span></button>`);
+  return L.join('');
+}
+function drawQr(el, url){
+  el.innerHTML = '';
+  el._canvas = null;
+  if (!url) return;
+  if (!window.qrcode) { el.textContent = 'QR unavailable'; return; }
+  const qr = qrcode(0, 'M');
+  qr.addData(url);
+  qr.make();
+  const n = qr.getModuleCount(), margin = 2, px = 12;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = (n + margin * 2) * px;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (qr.isDark(r, c)) x.fillRect((c + margin) * px, (r + margin) * px, px, px);
+  }
+  const img = new Image();
+  img.alt = 'QR code';
+  img.src = cv.toDataURL('image/png');
+  el.appendChild(img);
+  el._canvas = cv;
+}
+async function shareCard(c, lang){
+  const t = T[lang] || T.en;
+  const data = { title: fullName(c), text: [fullName(c), c.title, c.company].filter(Boolean).join(' – '), url: c.publicUrl };
+  if (navigator.share) { try { await navigator.share(data); } catch(e){} return; }
+  try { await navigator.clipboard.writeText(c.publicUrl); alert(t.copied); }
+  catch(e){ prompt(t.copy, c.publicUrl); }
+}
+
+
+function view(id){ ['vLoading','vPublic','vMissing'].forEach(v => $('#' + v).hidden = v !== id); }
+
+function render(c, offline){
+  c.publicUrl = cardUrl(c.slug);
+  const t = resolveTheme(c);
+  applyTheme($('#vPublic'), t);
+  document.body.style.background = document.documentElement.style.background = t.bg;
+  document.querySelector('meta[name=theme-color]').content = t.bg;
+  document.documentElement.lang = t.lang;
+  document.title = [fullName(c), c.title].filter(Boolean).join(' – ') || 'Business card';
+  $('#pubCard').innerHTML = cardHtml(c, t);
+  $('#pubLinks').innerHTML = linksHtml(c, t.lang);
+  $('#pubLinks [data-share]').onclick = () => shareCard(c, t.lang);
+  $('#pubScan').textContent = T[t.lang].scan;
+  $('#pubOffline').textContent = T[t.lang].offline;
+  $('#pubOffline').hidden = !offline;
+  drawQr($('#pubQr'), c.publicUrl);
+  view('vPublic');
+}
+
+(async function start(){
+  const slug = (new URLSearchParams(location.search).get('c') || '').trim().toLowerCase();
+  if (!slug || !/^[a-z0-9-]{2,40}$/.test(slug)) { view('vMissing'); return; }
+  const saved = cache.get(slug);
+  if (saved) { try { render(JSON.parse(saved), false); } catch(e){} }
+  try {
+    const res = await fetch(API + '?c=' + encodeURIComponent(slug));
+    const j = await res.json();
+    if (j.ok) { cache.set(slug, JSON.stringify(j.data)); render(j.data, false); }
+    else { cache.set(slug, null); view('vMissing'); }
+  } catch (e) {
+    if (saved) $('#pubOffline').hidden = false;
+    else {
+      $('#missingTitle').textContent = 'No connection';
+      $('#missingText').textContent = 'The card could not be loaded. Check your internet connection and try again.';
+      view('vMissing');
+    }
+  }
+})();
+</script>
+</body>
+</html>
