@@ -16,7 +16,11 @@
 <script src="qrcode.min.js"></script>
 <script>
   /* Offentlig side: det er denne side, andre ser, når de scanner din QR-kode.
-     Den har intet login og ingen editor. Samme adresse som i index.html: */
+     Den har intet login og ingen editor.
+
+     PUBLIC_SHEET_ID: ID på regnearket "Visitkort offentlig" (står i loggen, når du kører setup).
+     Kortet læses direkte derfra, så det virker uanset hvilken Google-konto folk er logget ind med. */
+  window.PUBLIC_SHEET_ID = "INDSÆT-OFFENTLIG-ID";
   window.API_URL = "https://script.google.com/macros/s/AKfycbwOQC_TmmLTr4B0kn51kiDF3eElpHx2pRSZ3LN65EGtPL478SoItdAHqkhl6U04h2m9/exec";
 </script>
 <style>
@@ -211,18 +215,6 @@ async function shareCard(c, lang){
 }
 
 
-function jsonp(url){
-  return new Promise((resolve, reject) => {
-    const name = 'vkcb' + Date.now() + Math.floor(Math.random() * 1000);
-    const el = document.createElement('script');
-    const done = () => { delete window[name]; el.remove(); clearTimeout(timer); };
-    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 15000);
-    window[name] = data => { done(); resolve(data); };
-    el.onerror = () => { done(); reject(new Error('load failed')); };
-    el.src = url + (url.indexOf('?') < 0 ? '?' : '&') + 'callback=' + name;
-    document.head.appendChild(el);
-  });
-}
 function view(id){ ['vLoading','vPublic','vMissing'].forEach(v => $('#' + v).hidden = v !== id); }
 
 function render(c, offline){
@@ -236,6 +228,9 @@ function render(c, offline){
   $('#pubCard').innerHTML = cardHtml(c, t);
   $('#pubLinks').innerHTML = linksHtml(c, t.lang);
   $('#pubLinks [data-share]').onclick = () => shareCard(c, t.lang);
+  const save = $('#pubLinks a.primary');
+  save.href = '#';
+  save.onclick = ev => { ev.preventDefault(); saveContact(c, t.lang); };
   $('#pubScan').textContent = T[t.lang].scan;
   $('#pubOffline').textContent = T[t.lang].offline;
   $('#pubOffline').hidden = !offline;
@@ -243,36 +238,126 @@ function render(c, offline){
   view('vPublic');
 }
 
+/* ---------- data ---------- */
+const SHEET = window.PUBLIC_SHEET_ID;
+const sheetReady = () => /^[A-Za-z0-9_-]{20,}$/.test(SHEET || '');
+
+function gvizUrl(slug, handler){
+  const tq = encodeURIComponent("select * where A = '" + slug + "'");
+  const tqx = 'out:json' + (handler ? ';responseHandler:' + handler : '');
+  return 'https://docs.google.com/spreadsheets/d/' + SHEET + '/gviz/tq?headers=1&sheet=Kort&tqx=' + encodeURIComponent(tqx) + '&tq=' + tq;
+}
+function gvizToCard(r){
+  if (!r || r.status === 'error') throw new Error('sheet: ' + ((r && r.errors && r.errors[0] && r.errors[0].detailed_message) || 'error'));
+  const t = r.table;
+  if (!t.rows.length) return null;
+  const o = {};
+  t.cols.forEach((col, i) => {
+    const cell = t.rows[0].c[i];
+    o[col.label || col.id] = cell && cell.v != null ? String(cell.v) : '';
+  });
+  return o.slug ? o : null;
+}
+function script(url, name){
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    const done = () => { delete window[name]; el.remove(); clearTimeout(timer); };
+    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 15000);
+    window[name] = data => { done(); resolve(data); };
+    el.onerror = () => { done(); reject(new Error('load failed')); };
+    el.src = url;
+    document.head.appendChild(el);
+  });
+}
+const cbName = () => 'vkcb' + Date.now() + Math.floor(Math.random() * 1e4);
+
+// Returnerer kortet, null (findes ikke) eller kaster fejl (kunne ikke hentes)
+async function loadCard(slug){
+  const errors = [];
+  if (sheetReady()) {
+    try {
+      const txt = await (await fetch(gvizUrl(slug))).text();
+      const json = txt.slice(txt.indexOf('(') + 1, txt.lastIndexOf(')'));
+      return gvizToCard(JSON.parse(json));
+    } catch (e) { errors.push('sheet-fetch: ' + e.message); }
+    try {
+      const n = cbName();
+      return gvizToCard(await script(gvizUrl(slug, n), n));
+    } catch (e) { errors.push('sheet-script: ' + e.message); }
+  } else errors.push('PUBLIC_SHEET_ID mangler');
+
+  // Reserve: Apps Script
+  try {
+    const n = cbName();
+    const j = await script(API + '?count=0&c=' + encodeURIComponent(slug) + '&callback=' + n, n);
+    return j.ok ? j.data : null;
+  } catch (e) { errors.push('api: ' + e.message); }
+  throw new Error(errors.join(' | '));
+}
+
+function ping(slug, save){
+  try { (new Image()).src = API + '?ping=' + encodeURIComponent(slug) + (save ? '&save=1' : '') + '&t=' + Date.now(); } catch(e){}
+}
+
+/* ---------- gem kontakt (laves på telefonen) ---------- */
+function vcard(c, lang){
+  const e = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
+  const fold = line => { const out = [line.slice(0, 75)]; for (let i = 75; i < line.length; i += 74) out.push(' ' + line.slice(i, i + 74)); return out.join('\r\n'); };
+  const L = ['BEGIN:VCARD', 'VERSION:3.0', 'N:' + e(c.lastName) + ';' + e(c.firstName) + ';;;', 'FN:' + e(fullName(c))];
+  if (c.company) L.push('ORG:' + e(c.company));
+  if (c.title) L.push('TITLE:' + e(c.title));
+  if (c.phone) L.push('TEL;TYPE=CELL,VOICE:' + c.phone.replace(/[^\d+]/g, ''));
+  if (c.email) L.push('EMAIL;TYPE=INTERNET,WORK:' + c.email);
+  if (okUrl(c.web)) L.push('URL;TYPE=WORK:' + c.web);
+  let n = 1;
+  if (okUrl(c.linkedin)) { L.push('item' + n + '.URL:' + c.linkedin, 'item' + n + '.X-ABLabel:LinkedIn', 'X-SOCIALPROFILE;TYPE=linkedin:' + c.linkedin); n++; }
+  parseLinks(c.links).forEach(l => { if (okUrl(l.url)) { L.push('item' + n + '.URL:' + l.url, 'item' + n + '.X-ABLabel:' + e(l.label || 'Link')); n++; } });
+  L.push('item' + n + '.URL:' + c.publicUrl, 'item' + n + '.X-ABLabel:' + (lang === 'da' ? 'Visitkort' : 'Business card'));
+  if (c.address) L.push('ADR;TYPE=WORK:;;' + e(c.address) + ';;;;');
+  if (c.note) L.push('NOTE:' + e(c.note));
+  if (/^data:image\/jpeg;base64,/.test(c.photo || '')) L.push(fold('PHOTO;ENCODING=b;TYPE=JPEG:' + c.photo.split(',')[1]));
+  L.push('END:VCARD');
+  return L.join('\r\n') + '\r\n';
+}
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function saveContact(c, lang){
+  const text = vcard(c, lang);
+  const name = (fullName(c) || 'contact').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') + '.vcf';
+  const blob = new Blob([text], { type: 'text/vcard;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  ping(c.slug, true);
+  if (isIOS()) {
+    // Safari viser kontakten med "Opret ny kontakt"
+    window.location.href = url;
+  } else {
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/* ---------- start ---------- */
 (async function start(){
   const slug = (new URLSearchParams(location.search).get('c') || '').trim().toLowerCase();
   if (!slug || !/^[a-z0-9-]{2,40}$/.test(slug)) { view('vMissing'); return; }
   const saved = cache.get(slug);
   if (saved) { try { render(JSON.parse(saved), false); } catch(e){} }
-  let res, j, detail = '';
-  // 1) Almindelig hentning
   try {
-    res = await fetch(API + '?c=' + encodeURIComponent(slug));
-    const txt = await res.text();
-    try { j = JSON.parse(txt); }
-    catch (e) { detail = 'HTTP ' + res.status + ': ' + txt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120); }
-  } catch (e) { detail = 'fetch: ' + e.message; }
-  // 2) Reserve-metode som Safari ikke blokerer
-  if (!j) {
-    try { j = await jsonp(API + '?c=' + encodeURIComponent(slug)); res = res || true; }
-    catch (e) { detail += ' | jsonp: ' + e.message; }
+    const c = await loadCard(slug);
+    if (c) { cache.set(slug, JSON.stringify(c)); render(c, false); ping(slug, false); }
+    else { cache.set(slug, null); view('vMissing'); }
+  } catch (err) {
+    if (saved) { $('#pubOffline').hidden = false; return; }
+    $('#missingTitle').textContent = 'Card could not be loaded';
+    $('#missingText').textContent = 'Please check your internet connection and try again.';
+    const d = document.createElement('p');
+    d.style.cssText = 'margin-top:18px;font-size:.75rem;opacity:.6;word-break:break-word';
+    d.textContent = err.message;
+    $('#vMissing').appendChild(d);
+    view('vMissing');
   }
-  if (j && j.ok) { cache.set(slug, JSON.stringify(j.data)); render(j.data, false); return; }
-  if (j && !j.ok) { cache.set(slug, null); view('vMissing'); return; }
-  if (saved) { $('#pubOffline').hidden = false; return; }
-  $('#missingTitle').textContent = res ? 'Card could not be loaded' : 'No connection';
-  $('#missingText').textContent = res
-    ? 'The server did not respond as expected. Please try again later.'
-    : 'Check your internet connection and try again.';
-  const d = document.createElement('p');
-  d.style.cssText = 'margin-top:18px;font-size:.75rem;opacity:.6;word-break:break-word';
-  d.textContent = detail;
-  $('#vMissing').appendChild(d);
-  view('vMissing');
 })();
 </script>
 </body>
