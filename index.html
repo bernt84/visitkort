@@ -175,6 +175,10 @@ body.showing{padding:0}
     <div id="showCard"></div>
     <div class="showqr" id="showQr"></div>
     <p class="showhint" id="showHint"></p>
+    <div class="showtabs" id="qrMode" role="tablist" aria-label="Type QR-kode">
+      <button type="button" role="tab" data-mode="vcard">Kontakt</button>
+      <button type="button" role="tab" data-mode="link">Kort med link</button>
+    </div>
     <div class="showbar">
       <button type="button" id="showShare">Del link</button>
       <button type="button" id="showEdit">Editor</button>
@@ -357,7 +361,8 @@ body.showing{padding:0}
           <input id="shareUrl" class="mono" readonly>
           <div class="row noprint">
             <button class="sm" id="bCopy" type="button">Kopiér link</button>
-            <button class="sm" id="bQr" type="button">Hent QR-kode</button>
+            <button class="sm" id="bQr" type="button">Hent QR (link)</button>
+            <button class="sm" id="bQrV" type="button">Hent QR (kontakt)</button>
             <a class="fbtn sm" id="bOpen" target="_blank" rel="noopener">Åbn kortet</a>
             <button class="sm" id="bNfc" type="button" hidden>Skriv NFC-tag</button>
           </div>
@@ -925,14 +930,17 @@ $('#bCopy').addEventListener('click', async () => {
   catch (e) { i.select(); i.setSelectionRange(0, 9999); try { document.execCommand('copy'); } catch(_){} }
   msg('#mCard', 'Linket er kopieret.', true);
 });
-$('#bQr').addEventListener('click', () => {
-  const cv = $('#prevQr')._canvas;
-  if (!cv || !EDIT) return;
+function saveQr(text, name){
+  const box = document.createElement('div');
+  drawQr(box, text);
+  if (!box._canvas) return;
   const a = document.createElement('a');
-  a.href = cv.toDataURL('image/png');
-  a.download = 'qr-' + EDIT.slug + '.png';
+  a.href = box._canvas.toDataURL('image/png');
+  a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
-});
+}
+$('#bQr').addEventListener('click', () => { if (EDIT) saveQr(cardUrl(EDIT.slug), 'qr-link-' + EDIT.slug + '.png'); });
+$('#bQrV').addEventListener('click', () => { if (EDIT) saveQr(vcardShort(EDIT), 'qr-kontakt-' + EDIT.slug + '.png'); });
 
 /* ---------- brugere (admin) ---------- */
 async function loadUsers(){
@@ -1008,6 +1016,24 @@ $('#fNew').addEventListener('submit', e => {
 });
 
 /* ---------- mit kort i fuld skærm ---------- */
+// Kort vCard til QR-koden. Uden billede, så koden bliver til at scanne.
+function vcardShort(c){
+  const e = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, ' ').replace(/([,;])/g, '\\$1');
+  const L = ['BEGIN:VCARD', 'VERSION:3.0', 'N:' + e(c.lastName) + ';' + e(c.firstName) + ';;;', 'FN:' + e(fullName(c))];
+  if (c.company) L.push('ORG:' + e(c.company));
+  if (c.title) L.push('TITLE:' + e(c.title));
+  if (c.phone) L.push('TEL;TYPE=CELL,VOICE:' + c.phone.replace(/[^\d+]/g, ''));
+  if (c.email) L.push('EMAIL;TYPE=INTERNET,WORK:' + c.email);
+  if (okUrl(c.linkedin)) L.push('URL:' + c.linkedin);
+  if (okUrl(c.web)) L.push('URL:' + c.web);
+  if (c.address) L.push('ADR;TYPE=WORK:;;' + e(c.address) + ';;;;');
+  L.push('URL:' + cardUrl(c.slug));
+  L.push('END:VCARD');
+  return L.join('\r\n');
+}
+const qrMode = () => ls.get('qrmode') === 'link' ? 'link' : 'vcard';
+const qrPayload = c => qrMode() === 'link' ? cardUrl(c.slug) : vcardShort(c);
+
 function cacheMyCards(list){ ls.set('mine', JSON.stringify(list || [])); }
 function getMyCards(){
   try { const v = JSON.parse(ls.get('mine') || 'null'); return (Array.isArray(v) ? v : (v ? [v] : [])).map(withUrl); }
@@ -1037,12 +1063,23 @@ function showMine(slug){
   $('#showPick').hidden = list.length < 2;
   $('#showTabs').innerHTML = list.map(x => `<button type="button" role="tab" data-slug="${esc(x.slug)}" aria-selected="${x.slug === c.slug}">${esc(x.label || 'Profil')}</button>`).join('');
   $('#showCard').innerHTML = cardHtml(c, t);
-  drawQr($('#showQr'), c.hidden ? '' : c.publicUrl);
-  $('#showHint').textContent = c.hidden ? 'Profilen er skjult – QR-koden virker ikke.' : T[t.lang].scanSave;
+  const mode = qrMode();
+  document.querySelectorAll('#qrMode button').forEach(b => b.setAttribute('aria-selected', b.dataset.mode === mode));
+  const hiddenLink = c.hidden && mode === 'link';
+  drawQr($('#showQr'), hiddenLink ? '' : qrPayload(c));
+  $('#showHint').textContent = hiddenLink
+    ? 'Profilen er skjult – linket virker ikke. Vælg "Kontakt".'
+    : (mode === 'vcard'
+        ? (t.lang === 'da' ? 'Scan med kameraet for at gemme mine oplysninger direkte.' : 'Scan with the camera to save my details right away.')
+        : T[t.lang].scanSave);
   show('vShow');
   keepAwake(true);
   return true;
 }
+$('#qrMode').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]');
+  if (b) { ls.set('qrmode', b.dataset.mode); showMine(ls.get('mineCurrent')); }
+});
 $('#showTabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-slug]');
   if (b) showMine(b.dataset.slug);
