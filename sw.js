@@ -1,6 +1,6 @@
 /* Visitkort – service worker (offline + installation)
    Ret VERSION, når du uploader nye filer, så telefonerne henter dem. */
-const VERSION = 'visitkort-v7';
+const VERSION = 'visitkort-v8';
 const SHELL = ['./', './index.html', './card.html', './manifest.webmanifest', './qrcode.min.js',
                './icon-192.png', './icon-512.png', './icon-512-maskable.png', './apple-touch-icon.png'];
 
